@@ -14,6 +14,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS privacy_consents (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  account_identifier VARCHAR(160) NOT NULL,
+  account_role ENUM('student', 'adviser', 'coordinator') NOT NULL,
+  notice_version VARCHAR(40) NOT NULL,
+  accepted_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_privacy_consent (account_identifier, account_role, notice_version)
+);
+
 CREATE TABLE IF NOT EXISTS authorized_students (
   student_number VARCHAR(30) PRIMARY KEY,
   pup_webmail VARCHAR(160) NOT NULL UNIQUE,

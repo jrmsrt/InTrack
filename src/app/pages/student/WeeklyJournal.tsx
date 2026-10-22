@@ -409,7 +409,7 @@ export function WeeklyJournal() {
 
                   <h3 className="text-center font-serif text-lg my-3 tracking-wide">WEEKLY JOURNAL REPORT</h3>
 
-                  <table className="w-full border-collapse border border-black text-[10px] table-fixed">
+                  <table className="intrack-table w-full border-collapse border border-black text-[10px] table-fixed">
                     <tbody>
                       <tr className="text-center">
                         <td className="border border-black p-2 w-[16%]">Training Period</td>

@@ -2,8 +2,8 @@
 
 export const studentStats = {
   totalHours: 320,
-  requiredHours: 480,
-  remainingHours: 160,
+  requiredHours: 500,
+  remainingHours: 180,
   todayAttendance: 'checked-in',
   assignedTasks: 12,
   pendingTasks: 4,
@@ -102,45 +102,6 @@ export const progressReports = [
   },
 ];
 
-export const supervisorInterns = [
-  {
-    id: 1,
-    name: 'Sarah Johnson',
-    studentId: 'STU-2024-001',
-    university: 'Tech University',
-    company: 'TechCorp Inc.',
-    totalHours: 320,
-    requiredHours: 480,
-    taskCompletion: 67,
-    attendanceRate: 98,
-    status: 'active',
-  },
-  {
-    id: 2,
-    name: 'David Martinez',
-    studentId: 'STU-2024-002',
-    university: 'Tech University',
-    company: 'TechCorp Inc.',
-    totalHours: 280,
-    requiredHours: 480,
-    taskCompletion: 58,
-    attendanceRate: 95,
-    status: 'active',
-  },
-  {
-    id: 3,
-    name: 'Lisa Wang',
-    studentId: 'STU-2024-003',
-    university: 'Tech University',
-    company: 'TechCorp Inc.',
-    totalHours: 360,
-    requiredHours: 480,
-    taskCompletion: 75,
-    attendanceRate: 100,
-    status: 'active',
-  },
-];
-
 export const coordinatorStats = {
   totalInterns: 45,
   activePrograms: 8,
@@ -171,7 +132,7 @@ export const messages = [
   {
     id: 1,
     from: 'Michael Chen',
-    role: 'Supervisor',
+    role: 'Adviser',
     message: 'Great work on the authentication module!',
     timestamp: '2026-03-14 10:30 AM',
     unread: true,

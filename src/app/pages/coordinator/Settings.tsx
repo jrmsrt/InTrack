@@ -1,5 +1,8 @@
+import {Link} from 'react-router-dom';
+import {officialOjtCoordinator} from '../../data/institution';
+import {useCoordinatorModuleData} from '../../context/CoordinatorModuleData';
 import React, { useState } from 'react';
-import { useOJT } from '../../context/OJTContext';
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -8,7 +11,7 @@ import { toast } from 'sonner';
 import { Save, RefreshCw, ShieldAlert, Database } from 'lucide-react';
 
 export function Settings() {
-  const { systemSettings, updateSystemSettings, resetAllDemoData } = useOJT();
+  const { systemSettings, updateSystemSettings, resetAllDemoData } = useCoordinatorModuleData();
 
   // Local form states
   const [academicYear, setAcademicYear] = useState(systemSettings.academicYear);
@@ -16,23 +19,30 @@ export function Settings() {
   const [requiredHours, setRequiredHours] = useState(systemSettings.requiredHours);
   const [defaultRadius, setDefaultRadius] = useState(systemSettings.defaultRadius);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
+    try {
     e.preventDefault();
-    updateSystemSettings({
+    await updateSystemSettings({
       academicYear,
       semester,
       requiredHours: Number(requiredHours),
       defaultRadius: Number(defaultRadius)
     });
     toast.success("System configurations updated successfully!");
+  
+    } catch(error) { toast.error(error instanceof Error?error.message:"Unable to save. Please retry."); }
   };
 
   return (
     <div className="space-y-6 font-sans">
+      <p role="status" className="text-xs text-slate-500">Settings are managed per approved program policy. Global edits and mock reset are unavailable for real records.</p>
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-sans">System Settings</h1>
         <p className="text-slate-500 text-sm mt-0.5 font-light">Configure global academic term dates, targets, and location constraints.</p>
+        <p className="text-slate-500 text-sm mt-1">Official {officialOjtCoordinator.title}: {officialOjtCoordinator.name}</p>
       </div>
+
+      <Button asChild className="bg-[#800000] text-white"><Link to="/coordinator/enrollment">Manage classes and program requirements</Link></Button>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Settings form */}
@@ -76,7 +86,7 @@ export function Settings() {
 
               <div className="border-t border-slate-100 pt-4 flex justify-end">
                 <Button 
-                  type="submit" 
+                  disabled title="Approved program policy settings are managed separately" type="submit" 
                   className="bg-[#800000] hover:bg-[#6b0000] text-white text-xs font-bold px-5 flex items-center gap-1.5 cursor-pointer"
                 >
                   <Save className="h-4 w-4" /> Save System Settings
@@ -96,7 +106,7 @@ export function Settings() {
             <CardContent className="space-y-3.5 text-xs">
               <Button
                 variant="outline"
-                onClick={() => toast.success("Database backup compiled and saved in pup_ojt_backup.json!")}
+                disabled title="Backups are managed by the system operator"
                 className="w-full h-10 text-slate-700 hover:bg-slate-50 flex items-center justify-start px-3 gap-2 border-slate-205 cursor-pointer font-semibold"
               >
                 <Database className="h-4 w-4 text-[#800000]" />
@@ -105,7 +115,7 @@ export function Settings() {
 
               <Button
                 variant="ghost"
-                onClick={resetAllDemoData}
+                disabled title="Mock reset is unavailable for real records"
                 className="w-full h-10 text-red-700 hover:bg-red-50 hover:text-red-700 flex items-center justify-start px-3 gap-2 cursor-pointer font-bold"
               >
                 <RefreshCw className="h-4 w-4 shrink-0" />

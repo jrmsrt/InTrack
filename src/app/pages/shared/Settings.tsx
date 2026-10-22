@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from '../../components/ui/select';
 import { useAuth } from '../../context/AuthContext';
+import {useOJT} from '../../context/OJTContext';
 import { User, Lock, Bell, Briefcase, MailCheck, AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 const programOptions = [
@@ -35,7 +36,9 @@ const sectionOptions = [
 ];
 
 export function Settings() {
+  const {isBackendConnected}=useOJT();
   const { user, updateUser, resendVerificationEmail } = useAuth();
+  const isBackendAdviser=!!isBackendConnected&&user?.role==='adviser';
   const [profileData, setProfileData] = useState({
     name: user?.name || '',
     email: user?.email || '',
@@ -217,42 +220,6 @@ export function Settings() {
                     </div>
                   </>
                 )}
-                {user?.role === 'supervisor' && (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="company">Company/HTE Name</Label>
-                      <Input
-                        id="company"
-                        value={profileData.company}
-                        onChange={(event) => updateProfileField('company', event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="position">Position/Designation</Label>
-                      <Input
-                        id="position"
-                        value={profileData.position}
-                        onChange={(event) => updateProfileField('position', event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="supervisorContact">Contact Number</Label>
-                      <Input
-                        id="supervisorContact"
-                        value={profileData.contactNumber}
-                        onChange={(event) => updateProfileField('contactNumber', event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label htmlFor="companyAddress">Company Address</Label>
-                      <Input
-                        id="companyAddress"
-                        value={profileData.companyAddress}
-                        onChange={(event) => updateProfileField('companyAddress', event.target.value)}
-                      />
-                    </div>
-                  </>
-                )}
                 {user?.role === 'coordinator' && (
                   <>
                     <div className="space-y-2">
@@ -267,7 +234,7 @@ export function Settings() {
                 )}
               </div>
 
-              <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={handleSaveProfile}>Save Changes</Button>
+              <Button disabled={isBackendAdviser} title={isBackendAdviser?'Profile editing is not connected yet.':undefined} className="bg-indigo-600 hover:bg-indigo-700" onClick={handleSaveProfile}>Save Changes</Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -330,14 +297,14 @@ export function Settings() {
                   </button>
                 </div>
               </div>
-              <Button className="bg-indigo-600 hover:bg-indigo-700">Update Password</Button>
+              <Button disabled={isBackendAdviser} className="bg-indigo-600 hover:bg-indigo-700">Update Password</Button>
 
               <div className="pt-6 border-t border-slate-200">
                 <h4 className="font-medium text-slate-900 mb-4">Two-Factor Authentication</h4>
                 <p className="text-sm text-slate-600 mb-4">
-                  Add an extra layer of security to your account by enabling two-factor authentication.
+                  {isBackendAdviser?'Email OTP and your authenticator app are required at sign-in.':'Add an extra layer of security to your account by enabling two-factor authentication.'}
                 </p>
-                <Button variant="outline">Enable 2FA</Button>
+                <Button disabled={isBackendAdviser} variant="outline">{isBackendAdviser?'Authenticator required':'Enable 2FA'}</Button>
               </div>
             </CardContent>
           </Card>
@@ -406,7 +373,7 @@ export function Settings() {
                 />
               </div>
 
-              <Button className="bg-indigo-600 hover:bg-indigo-700">Save Preferences</Button>
+              <Button disabled={isBackendAdviser} className="bg-indigo-600 hover:bg-indigo-700">Save Preferences</Button>
             </CardContent>
           </Card>
         </TabsContent>

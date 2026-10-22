@@ -6,6 +6,7 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card"
+      data-interactive={props.onClick ? "true" : undefined}
       className={cn(
         "bg-card text-card-foreground flex flex-col gap-6 rounded-xl border",
         className,

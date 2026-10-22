@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { openNativeDocument } from '../../components/forms/requirementFiles';
 import { useOJT } from '../../context/OJTContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -18,11 +19,9 @@ import {
   Check, 
   X, 
   Search, 
-  Award, 
   AlertTriangle,
   Clock,
-  BookOpen,
-  FileText
+  ExternalLink
 } from 'lucide-react';
 import {
   Dialog,
@@ -40,6 +39,7 @@ export function PortfolioReview() {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [remarks, setRemarks] = useState('');
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [selectedAttachmentIndex, setSelectedAttachmentIndex] = useState(0);
 
   const submittedStudents = students.filter(s => s.portfolioSubmitted);
 
@@ -48,16 +48,34 @@ export function PortfolioReview() {
   );
 
   const student = students.find(s => s.studentId === selectedStudentId);
+  const portfolioFiles = student
+    ? [...student.preOJTRequirements, ...student.duringOJTRequirements, ...student.postOJTRequirements, student.moaState].flatMap(item => item.file ? [item.file] : [])
+    : [];
 
-  const handleReviewAction = (status: 'Approved' | 'Needs Revision') => {
+  const formatSubmissionDate = (value?: string) => {
+    if (!value) return 'Date and time not recorded';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(parsed);
+  };
+
+  const handleReviewAction = async (status: 'Approved' | 'Needs Revision') => {
     if (!selectedStudentId) return;
 
-    reviewPortfolio(selectedStudentId, status, remarks);
-    toast.success(`Portfolio submission is now ${status === 'Approved' ? 'Approved & Cleared' : 'Returned'}`);
+    try {
+    await reviewPortfolio(selectedStudentId, status, remarks);
+    toast.success(`Portfolio submission is now ${status === 'Approved' ? 'Approved' : 'Returned'}`);
     
     setReviewDialogOpen(false);
     setSelectedStudentId(null);
     setRemarks('');
+    } catch(error) { toast.error(error instanceof Error?error.message:'Review was not saved.'); }
   };
 
   return (
@@ -126,6 +144,7 @@ export function PortfolioReview() {
                         onClick={() => {
                           setSelectedStudentId(s.studentId);
                           setRemarks(s.portfolioRemarks || '');
+                          setSelectedAttachmentIndex(0);
                           setReviewDialogOpen(true);
                         }}
                         className="bg-[#800000] hover:bg-[#6b0000] text-white text-[10px] h-7 font-bold flex items-center gap-1.5 cursor-pointer"
@@ -144,7 +163,7 @@ export function PortfolioReview() {
       {/* Audit Detail Overlay Dialog */}
       {student && (
         <Dialog open={reviewDialogOpen} onOpenChange={() => setReviewDialogOpen(false)}>
-          <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto font-sans">
+          <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto font-sans">
             <DialogHeader>
               <DialogTitle>Audit Intern Portfolio Report</DialogTitle>
               <DialogDescription>
@@ -152,20 +171,57 @@ export function PortfolioReview() {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="py-4 space-y-6 text-xs">
-              {/* Document Outline Preview */}
-              <div className="border rounded-lg p-5 font-serif space-y-3.5 max-w-xl mx-auto bg-white shadow">
-                <h3 className="text-center font-bold text-xs uppercase tracking-tight text-slate-900 border-b pb-2">Compiled Portfolio Chapters Outline</h3>
-                <div className="space-y-1.5 leading-relaxed text-[10px]">
-                  <p className="flex justify-between"><span>Chapter I: Title Page & Internship Agreement</span><span className="font-sans font-bold text-green-600">✓ Checked</span></p>
-                  <p className="flex justify-between"><span>Chapter II: Endorsement Slips & Consent Forms</span><span className="font-sans font-bold text-green-600">✓ Checked</span></p>
-                  <p className="flex justify-between"><span>Chapter III: Memorandum of Agreement (MOA) Copy</span><span className="font-sans font-bold text-green-600">✓ Checked</span></p>
-                  <p className="flex justify-between"><span>Chapter IV: Daily Time Records (DTR Log Sheets)</span><span className="font-sans font-bold text-green-600">✓ Checked</span></p>
-                  <p className="flex justify-between"><span>Chapter V: Weekly Accomplishment Reports & Reflections</span><span className="font-sans font-bold text-green-600">✓ Checked</span></p>
-                  <p className="flex justify-between"><span>Chapter VI: Evaluation Forms (Adviser & Supervisor)</span><span className="font-sans font-bold text-green-600">✓ Checked</span></p>
-                  <p className="flex justify-between"><span>Chapter VII: Photographic Documentation & Certificates</span><span className="font-sans font-bold text-green-600">✓ Checked</span></p>
+            <div className="space-y-4">
+              <section className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-semibold text-slate-900">Submission details</h3>
+                  {student.portfolioApproved ? (
+                    <Badge className="bg-green-100 text-green-800 border-green-200">Endorsed</Badge>
+                  ) : (
+                    <Badge className="bg-blue-100 text-blue-800 border-blue-200">Awaiting Audit</Badge>
+                  )}
                 </div>
-              </div>
+                <p><span className="font-semibold text-slate-800">Student:</span> {student.name} ({student.studentNumber})</p>
+                <p><span className="font-semibold text-slate-800">Program and section:</span> {student.program} / {student.section}</p>
+                <p><span className="font-semibold text-slate-800">Company:</span> {student.companyName}</p>
+                <p><span className="font-semibold text-slate-800">Hours rendered:</span> {student.totalHoursRendered.toFixed(0)} hrs</p>
+                <p><span className="font-semibold text-slate-800">Submitted:</span> {formatSubmissionDate(student.portfolioSubmittedAt)}</p>
+                <p><span className="font-semibold text-slate-800">Uploaded documents:</span> {portfolioFiles.length}</p>
+              </section>
+
+              {student.coordinatorPortfolioStatus && student.coordinatorPortfolioStatus !== 'Pending' && (
+                <section className={`space-y-2 rounded-md border p-4 text-sm ${student.coordinatorPortfolioStatus === 'Approved' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+                  <h3 className="font-semibold">Coordinator review: {student.coordinatorPortfolioStatus === 'Approved' ? 'Final Approved' : 'Needs Revision'}</h3>
+                  <p>Reviewed: {formatSubmissionDate(student.coordinatorPortfolioReviewedAt)}</p>
+                  <p className="whitespace-pre-wrap">{student.coordinatorPortfolioRemarks || 'No coordinator remarks.'}</p>
+                </section>
+              )}
+
+              {portfolioFiles.length > 0 ? (
+                <div className="space-y-2">
+                  <Label htmlFor="portfolioAttachment" className="text-xs">Document</Label>
+                  <select
+                    id="portfolioAttachment"
+                    value={Math.min(selectedAttachmentIndex, portfolioFiles.length - 1)}
+                    onChange={(event) => setSelectedAttachmentIndex(Number(event.target.value))}
+                    className="block w-full rounded-md border border-slate-200 bg-white p-2 text-sm"
+                  >
+                    {portfolioFiles.map((file, index) => <option key={`${file.name}-${index}`} value={index}>{file.name}</option>)}
+                  </select>
+                </div>
+              ) : (
+                <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">No uploaded portfolio document is available.</p>
+              )}
+
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={portfolioFiles.length === 0}
+                onClick={() => openNativeDocument(portfolioFiles[selectedAttachmentIndex])}
+              >
+                <ExternalLink className="mr-2 h-4 w-4" /> View Document
+              </Button>
 
               {/* Remarks Field */}
               <div className="space-y-1.5">
@@ -177,13 +233,11 @@ export function PortfolioReview() {
                   onChange={(e) => setRemarks(e.target.value)}
                 />
               </div>
-            </div>
-
             <DialogFooter className="gap-2 sm:gap-0">
               <Button
-                variant="outline"
+                variant="secondary"
                 onClick={() => handleReviewAction('Needs Revision')}
-                className="text-xs border-amber-300 text-amber-800 hover:bg-amber-50 cursor-pointer"
+                className="text-xs cursor-pointer"
               >
                 <X className="h-3.5 w-3.5 mr-1" /> Request Revision
               </Button>
@@ -191,9 +245,10 @@ export function PortfolioReview() {
                 onClick={() => handleReviewAction('Approved')}
                 className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold cursor-pointer"
               >
-                <Check className="h-3.5 w-3.5 mr-1" /> Approve & Clear Internship
+                <Check className="h-3.5 w-3.5 mr-1" /> Endorse to Coordinator
               </Button>
             </DialogFooter>
+            </div>
           </DialogContent>
         </Dialog>
       )}

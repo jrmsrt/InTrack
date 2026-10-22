@@ -1,3 +1,6 @@
+import { NativeFilePreviewLink } from '../../components/forms/FileViewer';
+import {officialOjtCoordinator} from '../../data/institution';
+import { readUploadedDocument } from '../../lib/uploadedDocument';
 import React, { useState, useRef } from 'react';
 import { useOJT } from '../../context/OJTContext';
 import { useAuth } from '../../context/AuthContext';
@@ -42,9 +45,11 @@ interface HTERecord {
 
 export function MOATracking() {
   const { user } = useAuth();
-  const { students, uploadMOA } = useOJT();
+  const { students, templates, htePartners, uploadMOA, isBackendConnected, uploadRequirementFile } = useOJT();
   
   const [mockFileName, setMockFileName] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const uploadingRef = useRef(false);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
 
   // Drag and drop states
@@ -53,10 +58,10 @@ export function MOATracking() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Keep track of actual uploaded file references & object URLs for dynamic preview
-  const [uploadedFiles, setUploadedFiles] = useState<Record<string, { file: File; url: string }>>({});
+  
 
   // File Preview state
-  const [previewOpen, setPreviewOpen] = useState(false);
+  
 
   // Excel HTE grid preview states
   const [searchQuery, setSearchQuery] = useState('');
@@ -65,6 +70,7 @@ export function MOATracking() {
   const [activeTab, setActiveTab] = useState('Active HTEs');
 
   const student = students.find(s => s.studentId === user?.id || s.email === user?.email);
+  const moaTemplate = templates.find(template => template.status === 'Published' && (template.name.toLowerCase().includes('memorandum') || template.name.toLowerCase().includes('moa')));
 
   if (!student) {
     return (
@@ -108,7 +114,7 @@ export function MOATracking() {
     originalFileName: string
   ) => {
     const nameParts = studentName.trim().split(/\s+/);
-    const lastName = nameParts[nameParts.length - 1] || 'Student';
+    const lastName = studentName.includes(',') ? studentName.split(',')[0].trim() : nameParts[nameParts.length - 1] || 'Student';
 
     let course = 'Course';
     if (program) {
@@ -179,30 +185,30 @@ export function MOATracking() {
     setUploadDialogOpen(false);
   };
 
-  const handleMOAUploadSubmit = (e: React.FormEvent) => {
+  const handleMOAUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mockFileName.trim()) return;
 
-    if (selectedFile) {
-      const objectUrl = URL.createObjectURL(selectedFile);
-      setUploadedFiles({
-        "moa": { file: selectedFile, url: objectUrl }
-      });
-    }
-
-    uploadMOA(student.studentId, mockFileName);
-    toast.success(`Successfully uploaded MOA: ${mockFileName}`, {
-      description: "Coordinator has been alerted to review your submission."
-    });
-    resetUploadState();
+    if (!selectedFile) return;
+    if (uploadingRef.current) return;
+    uploadingRef.current = true; setIsUploading(true);
+    try {
+      if (isBackendConnected) {
+        if (!uploadRequirementFile) throw new Error('Upload service unavailable. Please refresh.');
+        await uploadRequirementFile('pre', 'Notarize Memorandum of Agreement (MOA)', new File([selectedFile], mockFileName, {type:selectedFile.type || 'application/pdf'}));
+      } else { await uploadMOA(student.studentId, mockFileName, await readUploadedDocument(selectedFile, mockFileName)); }
+      toast.success(`Successfully uploaded MOA: ${mockFileName}`, {description:'Saved for coordinator review. MOA routing status is updated by the coordinator.'});
+      resetUploadState();
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Upload failed. Please retry.'); }
+    finally { uploadingRef.current = false; setIsUploading(false); }
   };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case 'SAS COPY SUBMITTED':
+        return <Badge className="bg-green-100 text-green-800 border-green-200 font-semibold">SAS COPY SUBMITTED</Badge>;
       case 'SIGNED AND NOTARIZED':
         return <Badge className="bg-green-100 text-green-800 border-green-200 font-semibold">SIGNED AND NOTARIZED</Badge>;
-      case 'SAS COPY':
-        return <Badge className="bg-green-105 text-green-850 border-green-255 font-bold">SAS COPY (Approved)</Badge>;
       case 'FOR NOTARIZATION':
         return <Badge className="bg-purple-100 text-purple-800 border-purple-200 font-semibold">FOR NOTARIZATION</Badge>;
       case 'IN-PROCESS FOR REVISION':
@@ -222,97 +228,8 @@ export function MOATracking() {
     { label: 'FOR COMPANY REVIEW', desc: 'Send draft copy to HTE management.' },
     { label: 'IN-PROCESS FOR REVIEW OF ULCO', desc: 'University Legal Counsel checking.' },
     { label: 'FOR NOTARIZATION', desc: 'Signatures and notary public stamping.' },
-    { label: 'SAS COPY', desc: 'Approved copy submitted to SAS. Clearance unlocked.' }
-  ];
-
-  // Excel spreadsheet mock data
-  const activeHteData: HTERecord[] = [
-    {
-      companyName: 'TechCorp Inc.',
-      address: '14 Innovation Drive, Makati City',
-      supervisorName: 'Michael Chen',
-      email: 'contact@techcorp.com',
-      phone: '0917 555 0202',
-      dateNotarized: '2025-06-15'
-    },
-    {
-      companyName: 'Northstar Analytics',
-      address: '88 Cyber Boulevard, Quezon City',
-      supervisorName: 'Anna Cruz',
-      email: 'hr@northstar.io',
-      phone: '0918 222 3344',
-      dateNotarized: '2025-08-20'
-    },
-    {
-      companyName: 'City IT Office',
-      address: 'Municipal Hall, Pasig City',
-      supervisorName: 'Engr. Raul Gomez',
-      email: 'pasigit@pasig.gov.ph',
-      phone: '0905 888 1234',
-      dateNotarized: '2024-11-12'
-    },
-    {
-      companyName: 'Synergy Software Solutions',
-      address: '456 Tech Park, Taguig City',
-      supervisorName: 'Sophia Reynolds',
-      email: 'careers@synergy.com',
-      phone: '0919 123 4567',
-      dateNotarized: '2025-01-10'
-    },
-    {
-      companyName: 'Nexus Digital Systems',
-      address: '12 Orchard Road, Mandaluyong City',
-      supervisorName: 'David Vance',
-      email: 'contact@nexusdigi.com',
-      phone: '0922 987 6543',
-      dateNotarized: '2025-03-05'
-    },
-    {
-      companyName: 'Vanguard Web Services',
-      address: '78 Pioneer Tower, Pasig City',
-      supervisorName: 'Clara Oswald',
-      email: 'info@vanguardweb.com',
-      phone: '0935 444 5555',
-      dateNotarized: '2025-04-18'
-    }
-  ];
-
-  const pendingHteData: HTERecord[] = [
-    {
-      companyName: 'Apex Digital Solutions',
-      address: '22 Orchard Road, Pasig City',
-      supervisorName: 'Mark Spencer',
-      email: 'contact@apex.com',
-      phone: '0988 777 6655',
-      dateNotarized: 'PENDING REVIEW'
-    },
-    {
-      companyName: 'Genesis Web Devs',
-      address: '101 Cyber Plaza, Mandaluyong City',
-      supervisorName: 'Lisa Kudrow',
-      email: 'hr@genesisweb.com',
-      phone: '0917 111 2222',
-      dateNotarized: 'IN LEGAL OUTLINE'
-    }
-  ];
-
-  const archivedHteData: HTERecord[] = [
-    {
-      companyName: 'OldTech Corporation',
-      address: '99 Old Avenue, Manila',
-      supervisorName: 'John Doe',
-      email: 'oldtech@domain.com',
-      phone: '0900 111 2222',
-      dateNotarized: 'EXPIRED (2025-05-10)'
-    },
-    {
-      companyName: 'Retro Design Studios',
-      address: '14 Retro St, Quezon City',
-      supervisorName: 'Sylvia Plath',
-      email: 'retro@design.com',
-      phone: '0906 555 6666',
-      dateNotarized: 'TERMINATED (2024-12-01)'
-    }
+    { label: 'SIGNED AND NOTARIZED', desc: 'Coordinator confirms the signed and notarized agreement.' },
+    { label: 'SAS COPY SUBMITTED', desc: 'Coordinator confirms the signed and notarized MOA copy was submitted to SAS.' }
   ];
 
   const tabs = ['Active HTEs', 'Pending Partnerships', 'Archived Agreements'];
@@ -320,12 +237,12 @@ export function MOATracking() {
   const getHteData = () => {
     switch (activeTab) {
       case 'Pending Partnerships':
-        return pendingHteData;
+        return htePartners.filter(partner => partner.status === 'Pending');
       case 'Archived Agreements':
-        return archivedHteData;
+        return htePartners.filter(partner => partner.status === 'Archived');
       case 'Active HTEs':
       default:
-        return activeHteData;
+        return htePartners.filter(partner => partner.status === 'Active');
     }
   };
 
@@ -343,7 +260,11 @@ export function MOATracking() {
 
   const handleTabClick = (tab: string) => {
     setActiveTab(tab);
-    const data = tab === 'Active HTEs' ? activeHteData : tab === 'Pending Partnerships' ? pendingHteData : archivedHteData;
+    const data = tab === 'Active HTEs'
+      ? htePartners.filter(partner => partner.status === 'Active')
+      : tab === 'Pending Partnerships'
+        ? htePartners.filter(partner => partner.status === 'Pending')
+        : htePartners.filter(partner => partner.status === 'Archived');
     if (data.length > 0) {
       setSelectedCell({ col: 'A', row: 3 });
       setSelectedCellText(data[0].companyName);
@@ -357,81 +278,7 @@ export function MOATracking() {
     return selectedCell.col === col && selectedCell.row === row;
   };
 
-  const renderPreviewContent = () => {
-    const studentName = student.name;
-    const studentNo = student.studentNumber;
-    const course = student.program.split(/[—–-]/)[0]?.trim() || 'BSIT';
-
-    const actualUpload = uploadedFiles["moa"];
-    if (actualUpload) {
-      return (
-        <div className="bg-slate-50 border border-slate-200 rounded-lg p-1 min-h-[380px]">
-          <iframe 
-            src={actualUpload.url} 
-            title="MOA Preview" 
-            className="w-full h-[60vh] rounded border shadow-inner" 
-          />
-          <p className="text-[10px] text-slate-400 font-mono mt-2 text-center">
-            PDF Preview: {actualUpload.file.name} ({ (actualUpload.file.size / 1024 / 1024).toFixed(2) } MB)
-          </p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="border border-slate-300 rounded-lg p-6 bg-white font-sans text-slate-800 shadow-inner relative min-h-[380px] text-[10px] flex flex-col justify-between">
-        <div className="absolute inset-0 flex items-center justify-center opacity-[0.02] rotate-12 pointer-events-none">
-          <span className="text-6xl font-extrabold text-[#800000]">PUP PARTNER</span>
-        </div>
-        
-        <div>
-          <div className="text-center border-b pb-3 mb-4">
-            <h3 className="font-bold text-xs text-[#800000] uppercase tracking-wider">MEMORANDUM OF AGREEMENT</h3>
-            <p className="text-slate-450 text-[8px] mt-0.5 font-semibold">Polytechnic University of the Philippines & Host Training Establishment</p>
-          </div>
-          
-          <div className="space-y-3 mt-4 text-[10px] leading-relaxed">
-            <p className="font-bold text-slate-900">KNOWN ALL MEN BY THESE PRESENTS:</p>
-            <p className="text-justify text-slate-600 font-normal">
-              This Agreement entered into by and between:
-            </p>
-            <p className="pl-4 text-justify text-slate-600 font-normal">
-              The <strong>POLYTECHNIC UNIVERSITY OF THE PHILIPPINES</strong>, an institution of higher learning, represented herein by its Vice President for Academic Affairs, with office address at Anonas Street, Santa Mesa, Manila, hereinafter referred to as "PUP";
-            </p>
-            <p className="text-center font-bold text-slate-500 my-1">— and —</p>
-            <p className="pl-4 text-justify text-slate-600 font-normal">
-              The <strong>HOST TRAINING ESTABLISHMENT (HTE)</strong>, a corporation duly organized and existing under the laws of the Republic of the Philippines, represented by its HR Director/Manager, hereinafter referred to as "HTE".
-            </p>
-            
-            <h4 className="font-bold text-slate-800 mt-4">WITNESSETH:</h4>
-            <p className="text-justify text-slate-600 font-normal">
-              WHEREAS, PUP implements an Internship/On-the-Job Training Program for its senior students enrolled in the <span className="font-bold text-[#800000]">{course} ({student.section})</span> program, specifically for student <span className="font-bold text-slate-850">{studentName}</span> (ID: {studentNo});
-            </p>
-            
-            {student.moaState.status === 'SAS COPY' && (
-              <div className="p-3 bg-green-50 text-green-800 rounded border border-green-200 text-[9px] leading-relaxed mt-4 font-bold">
-                ✓ VERIFIED SAS COPY: Filed and processed at the Office of Student Affairs Services (SAS) for Academic Year 2025-2026.
-              </div>
-            )}
-            
-            {(student.moaState.status === 'SIGNED AND NOTARIZED' || student.moaState.status === 'SAS COPY') && (
-              <div className="p-3 bg-amber-50 rounded border border-amber-200 text-amber-800 text-[9px] leading-relaxed mt-4 font-semibold">
-                <strong>Notary Public Seal:</strong> Duly notarized under Doc No. 518, Page No. 92, Book No. XIV, Series of 2026.
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="flex justify-between items-end border-t pt-4 mt-6">
-          <div className="text-[8px] font-mono text-slate-400">{student.moaState.fileName || 'MOA_Draft_Template.pdf'}</div>
-          <div className="text-right">
-            <span className="font-bold text-slate-700 block text-[9px]">{studentName}</span>
-            <span className="text-[7px] text-slate-400 font-semibold uppercase tracking-wider block">OJT Intern Signature</span>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  
 
   return (
     <div className="space-y-6 font-sans">
@@ -460,7 +307,7 @@ export function MOATracking() {
                 <div className="p-3 bg-slate-50 rounded-lg">
                   <p className="font-bold text-slate-800">2. Review & Route</p>
                   <p className="text-slate-500 mt-1 font-normal leading-relaxed">
-                    Upload the filled draft here. The OJT Coordinator will review it. If legal revisions are requested, amend the draft.
+                    Upload the filled draft here. The OJT Coordinator, {officialOjtCoordinator.name}, will review it. If legal revisions are requested, amend the draft.
                   </p>
                 </div>
                 <div className="p-3 bg-slate-50 rounded-lg">
@@ -485,24 +332,29 @@ export function MOATracking() {
                   </div>
                   <div>
                     <p className="text-sm font-bold text-slate-900">Memorandum of Agreement Template</p>
-                    <p className="text-xs text-slate-550 font-normal">Latest Version: June 2026. File Format: DOCX</p>
+                    <p className="text-xs text-slate-550 font-normal">
+                      {moaTemplate ? `Latest update: ${moaTemplate.lastUpdated}` : 'Ask the coordinator to publish the MOA template link.'}
+                    </p>
                   </div>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  <a 
-                    href="https://docs.google.com/document/d/1A_3zSLiUpLxNSmEYj03WWhszT1_W7rPb/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-xs text-[#800000] hover:underline font-bold flex items-center gap-1 self-center"
-                  >
-                    See Template <ExternalLink className="h-3 w-3" />
-                  </a>
+                  {moaTemplate && (
+                    <a 
+                      href={moaTemplate.linkUrl}
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-xs text-[#800000] hover:underline font-bold flex items-center gap-1 self-center"
+                    >
+                      See Template <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
                   <Button 
                     asChild
+                    disabled={!moaTemplate}
                     className="bg-[#800000] hover:bg-[#6b0000] text-white text-xs font-bold flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
                   >
                     <a 
-                      href="https://docs.google.com/document/d/1A_3zSLiUpLxNSmEYj03WWhszT1_W7rPb/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true" 
+                      href={moaTemplate?.linkUrl || '#'} 
                       target="_blank" 
                       rel="noopener noreferrer"
                     >
@@ -566,33 +418,30 @@ export function MOATracking() {
                 {getStatusBadge(student.moaState.status)}
               </div>
 
+              {student.moaState.pendingUpload && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  <p className="mb-2">New upload awaiting coordinator review. Current status remains the previous coordinator decision.</p>
+                  <NativeFilePreviewLink file={student.moaState.pendingUpload.file}>{student.moaState.pendingUpload.fileName}</NativeFilePreviewLink>
+                </div>
+              )}
               {student.moaState.fileName && (
                 <div className="p-3 bg-red-50/20 border border-red-100/50 rounded-lg flex items-center gap-2 text-xs">
-                  <FileText className="h-4 w-4 text-[#800000]" />
-                  <span 
-                    className="font-bold text-slate-700 truncate max-w-[180px] hover:text-[#800000] hover:underline cursor-pointer flex items-center gap-1 transition-colors"
-                    title="Click to preview file"
-                    onClick={() => setPreviewOpen(true)}
-                  >
-                    {student.moaState.fileName}
-                  </span>
+                  <NativeFilePreviewLink file={student.moaState.file}>{student.moaState.fileName}</NativeFilePreviewLink>
                 </div>
               )}
 
               {/* Upload actions */}
               <div className="pt-2">
                 <Dialog open={uploadDialogOpen} onOpenChange={(open) => {
-                  if (!open) resetUploadState();
+                  if (!open && !uploadingRef.current) resetUploadState();
                 }}>
-                  {!(student.moaState.status === 'SIGNED AND NOTARIZED' || student.moaState.status === 'SAS COPY') && (
-                    <Button 
-                      onClick={() => setUploadDialogOpen(true)}
-                      className="w-full bg-[#800000] hover:bg-[#6b0000] text-white font-bold py-2.5 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                    >
-                      <Upload className="h-4 w-4" /> 
-                      {student.moaState.fileName ? 'Upload Revised Copy' : 'Upload Agreement Draft'}
-                    </Button>
-                  )}
+                  <Button 
+                    onClick={() => setUploadDialogOpen(true)}
+                    className="w-full bg-[#800000] hover:bg-[#6b0000] text-white font-bold py-2.5 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <Upload className="h-4 w-4" /> 
+                    {student.moaState.fileName ? 'Upload Revised Copy' : 'Upload Agreement Draft'}
+                  </Button>
                   <DialogContent className="sm:max-w-md">
                     <form onSubmit={handleMOAUploadSubmit}>
                       <DialogHeader>
@@ -605,7 +454,7 @@ export function MOATracking() {
                       </DialogHeader>
                       <div className="py-4 space-y-4 font-sans">
                         {/* DRAG AND DROP ZONE */}
-                        <div 
+                        <div data-interactive="true" 
                           className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
                             dragActive 
                               ? "border-[#800000] bg-red-50/30" 
@@ -657,13 +506,13 @@ export function MOATracking() {
                         )}
                       </div>
                       <DialogFooter className="gap-2 sm:gap-0">
-                        <Button type="button" variant="outline" onClick={resetUploadState} className="text-xs hover:bg-slate-100 hover:text-slate-900 border-slate-200 cursor-pointer transition-colors">
+                        <Button type="button" variant="outline" onClick={resetUploadState} disabled={isUploading} className="text-xs hover:bg-slate-100 hover:text-slate-900 border-slate-200 cursor-pointer transition-colors">
                           Cancel
                         </Button>
                         <Button 
                           type="submit" 
                           className="bg-[#800000] hover:bg-[#6b0000] text-white text-xs font-semibold cursor-pointer transition-colors shadow-sm"
-                          disabled={!selectedFile || !mockFileName.trim()}
+                          disabled={isUploading || !selectedFile || !mockFileName.trim()}
                         >
                           Upload File
                         </Button>
@@ -752,13 +601,13 @@ export function MOATracking() {
                 <span className="font-bold">Active_HTE_Partners_List.xlsx</span>
               </div>
               <div className="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded">
-                Read-Only Preview
+                Student Read-Only Preview
               </div>
             </div>
 
             {/* Table Area */}
             <div className="overflow-x-auto max-h-[350px]">
-              <table className="w-full text-[11px] border-collapse bg-white font-mono min-w-[900px]">
+              <table className="intrack-table w-full text-[11px] border-collapse bg-white font-mono min-w-[900px]">
                 <thead>
                   {/* Alphabetical Column Indicators */}
                   <tr className="bg-[#f3f2f1] border-b border-slate-300 text-slate-500 text-center font-bold">
@@ -773,35 +622,35 @@ export function MOATracking() {
                   {/* Header Row 1 */}
                   <tr className="bg-[#f3f2f1] text-slate-700 font-bold border-b border-slate-300 text-center">
                     <td className="text-center font-sans font-bold text-slate-400 border border-slate-300 bg-[#f3f2f1] w-8">1</td>
-                    <td 
+                    <td data-interactive="true" 
                       onClick={() => handleCellClick('A', 1, 'Company Name')}
                       className={`border border-slate-300 p-2 cursor-pointer hover:bg-green-50/50 align-middle ${isCellSelected('A', 1) ? 'ring-2 ring-green-600 bg-green-50/30 font-bold' : ''}`}
                       rowSpan={2}
                     >
                       Company Name
                     </td>
-                    <td 
+                    <td data-interactive="true" 
                       onClick={() => handleCellClick('B', 1, 'Complete Company Address')}
                       className={`border border-slate-300 p-2 cursor-pointer hover:bg-green-50/50 align-middle ${isCellSelected('B', 1) ? 'ring-2 ring-green-600 bg-green-50/30 font-bold' : ''}`}
                       rowSpan={2}
                     >
                       Complete Company Address
                     </td>
-                    <td 
+                    <td data-interactive="true" 
                       onClick={() => handleCellClick('C', 1, "Supervisor/Trainer's Name")}
                       className={`border border-slate-300 p-2 cursor-pointer hover:bg-green-50/50 align-middle ${isCellSelected('C', 1) ? 'ring-2 ring-green-600 bg-green-50/30 font-bold' : ''}`}
                       rowSpan={2}
                     >
                       Supervisor/Trainer's Name
                     </td>
-                    <td 
+                    <td data-interactive="true" 
                       onClick={() => handleCellClick('D', 1, 'Contact Details')}
                       className={`border border-slate-300 p-2 cursor-pointer hover:bg-green-50/50 align-middle ${isCellSelected('D', 1) ? 'ring-2 ring-green-600 bg-green-50/30 font-bold' : ''}`}
                       colSpan={2}
                     >
                       Contact Details
                     </td>
-                    <td 
+                    <td data-interactive="true" 
                       onClick={() => handleCellClick('F', 1, 'Date Notarized')}
                       className={`border border-slate-300 p-2 cursor-pointer hover:bg-green-50/50 align-middle ${isCellSelected('F', 1) ? 'ring-2 ring-green-600 bg-green-50/30 font-bold' : ''}`}
                       rowSpan={2}
@@ -813,13 +662,13 @@ export function MOATracking() {
                   {/* Header Row 2 */}
                   <tr className="bg-[#f3f2f1] text-slate-700 font-bold border-b border-slate-300 text-center">
                     <td className="text-center font-sans font-bold text-slate-400 border border-slate-300 bg-[#f3f2f1] w-8">2</td>
-                    <td 
+                    <td data-interactive="true" 
                       onClick={() => handleCellClick('D', 2, 'Email Address')}
                       className={`border border-slate-300 p-2 cursor-pointer hover:bg-green-50/50 ${isCellSelected('D', 2) ? 'ring-2 ring-green-600 bg-green-50/30 font-bold' : ''}`}
                     >
                       Email Address
                     </td>
-                    <td 
+                    <td data-interactive="true" 
                       onClick={() => handleCellClick('E', 2, 'Contact Number')}
                       className={`border border-slate-300 p-2 cursor-pointer hover:bg-green-50/50 ${isCellSelected('E', 2) ? 'ring-2 ring-green-600 bg-green-50/30 font-bold' : ''}`}
                     >
@@ -846,37 +695,37 @@ export function MOATracking() {
                           </td>
                           
                           {/* Cells */}
-                          <td 
+                          <td data-interactive="true" 
                             onClick={() => handleCellClick('A', excelRowNumber, row.companyName)}
                             className={`border border-slate-200 p-2 cursor-pointer font-sans font-semibold text-slate-805 ${isCellSelected('A', excelRowNumber) ? 'ring-2 ring-green-600 bg-green-50/55' : ''}`}
                           >
                             {row.companyName}
                           </td>
-                          <td 
+                          <td data-interactive="true" 
                             onClick={() => handleCellClick('B', excelRowNumber, row.address)}
                             className={`border border-slate-200 p-2 cursor-pointer font-sans text-slate-650 ${isCellSelected('B', excelRowNumber) ? 'ring-2 ring-green-600 bg-green-50/55' : ''}`}
                           >
                             {row.address}
                           </td>
-                          <td 
+                          <td data-interactive="true" 
                             onClick={() => handleCellClick('C', excelRowNumber, row.supervisorName)}
                             className={`border border-slate-200 p-2 cursor-pointer font-sans text-slate-700 ${isCellSelected('C', excelRowNumber) ? 'ring-2 ring-green-600 bg-green-50/55' : ''}`}
                           >
                             {row.supervisorName}
                           </td>
-                          <td 
+                          <td data-interactive="true" 
                             onClick={() => handleCellClick('D', excelRowNumber, row.email)}
                             className={`border border-slate-200 p-2 cursor-pointer text-blue-600 underline font-sans ${isCellSelected('D', excelRowNumber) ? 'ring-2 ring-green-600 bg-green-50/55' : ''}`}
                           >
                             {row.email}
                           </td>
-                          <td 
+                          <td data-interactive="true" 
                             onClick={() => handleCellClick('E', excelRowNumber, row.phone)}
                             className={`border border-slate-200 p-2 cursor-pointer text-slate-700 font-sans ${isCellSelected('E', excelRowNumber) ? 'ring-2 ring-green-600 bg-green-50/55' : ''}`}
                           >
                             {row.phone}
                           </td>
-                          <td 
+                          <td data-interactive="true" 
                             onClick={() => handleCellClick('F', excelRowNumber, row.dateNotarized)}
                             className={`border border-slate-200 p-2 cursor-pointer text-slate-600 font-sans text-center ${isCellSelected('F', excelRowNumber) ? 'ring-2 ring-green-600 bg-green-50/55' : ''}`}
                           >
@@ -911,29 +760,7 @@ export function MOATracking() {
       </Card>
 
       {/* DOCUMENT PREVIEW DIALOG */}
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto font-sans">
-          <DialogHeader className="border-b pb-2 mb-2">
-            <DialogTitle className="text-slate-900 font-sans font-bold flex items-center gap-2">
-              <FileCheck className="h-5 w-5 text-[#800000]" />
-              Memorandum of Agreement Preview
-            </DialogTitle>
-            <DialogDescription className="text-slate-500 font-normal text-xs truncate">
-              Previewing: <span className="font-mono text-slate-705 font-bold">{student.moaState.fileName || 'MOA_Draft_Template.pdf'}</span>
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="py-2 bg-slate-100 rounded-lg p-3 border border-slate-205">
-            {renderPreviewContent()}
-          </div>
-          
-          <DialogFooter className="border-t pt-3 mt-2">
-            <Button type="button" onClick={() => setPreviewOpen(false)} className="bg-[#800000] hover:bg-[#6b0000] text-white text-xs font-bold px-4 cursor-pointer transition-colors">
-              Close Preview
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      
     </div>
   );
 }

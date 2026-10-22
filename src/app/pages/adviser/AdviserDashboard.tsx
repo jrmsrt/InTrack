@@ -1,3 +1,4 @@
+import { welcomeName } from '../../lib/welcomeName';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -47,14 +48,14 @@ export function AdviserDashboard() {
       <div className="bg-slate-900 text-white p-6 rounded-2xl shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-wider">Faculty Portal</span>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Hello, Prof. {user?.name}!</h1>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Hello, Prof. {welcomeName(user?.name)}!</h1>
           <p className="text-slate-350 text-sm mt-1 font-light">
             Monitor and endorse clearances for your assigned OJT section groups.
           </p>
         </div>
         <div className="bg-white/10 px-4 py-2.5 rounded-xl border border-white/20 text-xs">
           <p className="text-slate-350">Academic Oversight:</p>
-          <p className="font-bold text-slate-100 text-sm mt-0.5">Section BSIT 4A & BSCpE 4A</p>
+          <p className="font-bold text-slate-100 text-sm mt-0.5">{[...new Set(assignedStudents.map(s=>s.section).filter(Boolean))].join(', ')||'No enrolled students yet'}</p>
         </div>
       </div>
 
@@ -71,7 +72,7 @@ export function AdviserDashboard() {
           <CardContent>
             <span className="text-3xl font-extrabold text-slate-900">{totalCount}</span>
             <span className="text-xs text-slate-500 font-medium ml-1">students</span>
-            <p className="text-[10px] text-slate-400 mt-4 font-medium">Monitoring BSIT and BSCpE cohorts</p>
+            <p className="text-[10px] text-slate-400 mt-4 font-medium">Students enrolled in your classes</p>
           </CardContent>
         </Card>
 
@@ -105,7 +106,7 @@ export function AdviserDashboard() {
           <CardContent>
             <span className="text-3xl font-extrabold text-slate-900">{completedHoursCount}</span>
             <span className="text-xs text-slate-500 font-medium ml-1">interns</span>
-            <p className="text-[10px] text-slate-400 mt-4 font-medium">Met 480 hours required duration</p>
+            <p className="text-[10px] text-slate-400 mt-4 font-medium">Met their program’s required hours</p>
           </CardContent>
         </Card>
 
@@ -212,7 +213,7 @@ export function AdviserDashboard() {
                 iconColor: "text-amber-600 dark:text-amber-400",
                 iconBg: "bg-amber-50 dark:bg-amber-950/40",
                 hoverBorder: "hover:border-amber-200 dark:hover:border-amber-900/50",
-                hoverBg: "hover:bg-amber-50/10 dark:hover:bg-amber-950/10",
+                hoverBg: "hover:bg-slate-100 dark:hover:bg-slate-800",
               },
               {
                 title: "Forms and Templates",

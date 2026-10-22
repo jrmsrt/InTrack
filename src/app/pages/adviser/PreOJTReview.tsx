@@ -1,3 +1,5 @@
+import { NativeFilePreviewLink } from '../../components/forms/FileViewer';
+import { DocumentReviewWorkspace } from '../../components/forms/FileViewer';
 import React, { useState } from 'react';
 import { useOJT } from '../../context/OJTContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
@@ -6,7 +8,7 @@ import { Badge } from '../../components/ui/badge';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { toast } from 'sonner';
-import { RequirementFilePreviewDialog, RequirementFilePreview } from '../../components/forms/RequirementFilePreviewDialog';
+import { RequirementFilePreview, openNativeDocument, resolveRequirementDocument } from '../../components/forms/requirementFiles';
 import {
   Table,
   TableBody,
@@ -52,7 +54,7 @@ export function AdviserPreOJTReview({ embedded = false, searchTerm = '', program
   const { students, reviewPreOJTReq } = useOJT();
 
   const [selectedReq, setSelectedReq] = useState<{ studentId: string; studentName: string; reqName: string; fileName: string; status: string; remarks: string } | null>(null);
-  const [previewReq, setPreviewReq] = useState<RequirementFilePreview | null>(null);
+  
   const [remarks, setRemarks] = useState('');
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
 
@@ -83,16 +85,16 @@ export function AdviserPreOJTReview({ embedded = false, searchTerm = '', program
 
   const openPreview = (req: { studentName: string; reqName: string; fileName: string }) => {
     if (!req.fileName) return;
-    setPreviewReq({
+    openNativeDocument(resolveRequirementDocument(students, {
       studentName: req.studentName,
       reqName: req.reqName,
       fileName: req.fileName,
       stage: 'Pre-OJT'
-    });
+    }));
   };
 
   const handleReviewAction = (status: 'Approved' | 'Needs Revision') => {
-    if (!selectedReq) return;
+    if (!selectedReq || !(students.find(s => s.studentId === selectedReq?.studentId)?.preOJTRequirements.find(r => r.name === selectedReq?.reqName)?.file?.url || ['Practicum kit (expanded envelope)', 'Attendance OJT Orientation'].includes(selectedReq?.reqName || ''))) return;
 
     reviewPreOJTReq(selectedReq.studentId, selectedReq.reqName, status, remarks);
     toast.success(`Pre-OJT requirement ${selectedReq.reqName} is now ${status === 'Approved' ? 'Approved' : 'Returned'}`);
@@ -148,15 +150,9 @@ export function AdviserPreOJTReview({ embedded = false, searchTerm = '', program
                     </TableCell>
                     <TableCell className="py-4 px-5 align-top text-xs whitespace-normal">
                       <div className="flex items-start gap-2 text-slate-600">
-                        <FileText className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-                        <button
-                          type="button"
-                          title="Click to preview file"
-                          onClick={() => openPreview(r)}
-                          className="text-xs font-semibold text-slate-600 whitespace-normal break-all text-left hover:text-[#800000] hover:underline cursor-pointer transition-colors"
-                        >
+                        <NativeFilePreviewLink file={resolveRequirementDocument(students, { studentName: r.studentName, reqName: r.reqName, fileName: r.fileName, stage: 'Pre-OJT' })}>
                           {r.fileName || 'No uploaded file'}
-                        </button>
+                        </NativeFilePreviewLink>
                       </div>
                     </TableCell>
                     <TableCell className="py-4 px-5 align-top">
@@ -191,26 +187,27 @@ export function AdviserPreOJTReview({ embedded = false, searchTerm = '', program
 
       {selectedReq && (
         <Dialog open={reviewDialogOpen} onOpenChange={() => setReviewDialogOpen(false)}>
-          <DialogContent className="sm:max-w-md font-sans">
+          <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[min(96vw,1400px)] max-h-[92vh] overflow-y-auto font-sans">
             <DialogHeader>
               <DialogTitle>Audit Pre-OJT Requirement</DialogTitle>
               <DialogDescription>
                 Reviewing <span className="font-semibold text-slate-800">{selectedReq.reqName}</span> submitted by {selectedReq.studentName}.
               </DialogDescription>
             </DialogHeader>
+<DocumentReviewWorkspace file={students.find(s => s.studentId === selectedReq.studentId)?.preOJTRequirements.find(r => r.name === selectedReq.reqName)?.file}>
 
             <div className="py-4 space-y-4 text-xs">
               <div className="p-3 bg-slate-50 rounded border flex items-center gap-2">
-                <FileText className="h-5 w-5 text-[#800000]" />
                 <div>
-                  <button
-                    type="button"
-                    title="Click to preview file"
-                    onClick={() => openPreview(selectedReq)}
-                    className="font-bold text-slate-800 text-[9px] truncate max-w-[180px] text-left underline-offset-2 hover:underline hover:text-[#800000] cursor-pointer"
-                  >
+                  <NativeFilePreviewLink file={resolveRequirementDocument(students, {
+                    studentId: selectedReq.studentId,
+                    studentName: selectedReq.studentName,
+                    reqName: selectedReq.reqName,
+                    fileName: selectedReq.fileName,
+                    stage: 'Pre-OJT'
+                  })}>
                     {selectedReq.fileName}
-                  </button>
+                  </NativeFilePreviewLink>
                   <p className="text-[10px] text-slate-400 font-medium">Submitted Pre-OJT document copy</p>
                 </div>
               </div>
@@ -228,31 +225,27 @@ export function AdviserPreOJTReview({ embedded = false, searchTerm = '', program
 
             <DialogFooter className="gap-2">
               <Button
-                variant="outline"
+                variant="secondary"
                 size="sm"
-                onClick={() => handleReviewAction('Needs Revision')}
-                className="border-amber-300 text-amber-800 hover:bg-amber-50 hover:text-amber-900 font-semibold cursor-pointer"
+                disabled={!(students.find(s => s.studentId === selectedReq?.studentId)?.preOJTRequirements.find(r => r.name === selectedReq?.reqName)?.file?.url || ['Practicum kit (expanded envelope)', 'Attendance OJT Orientation'].includes(selectedReq?.reqName || ''))} onClick={() => handleReviewAction('Needs Revision')}
+                className="font-semibold cursor-pointer"
               >
                 <X className="h-3.5 w-3.5 mr-1" /> Request Revision
               </Button>
               <Button
                 size="sm"
-                onClick={() => handleReviewAction('Approved')}
+                disabled={!(students.find(s => s.studentId === selectedReq?.studentId)?.preOJTRequirements.find(r => r.name === selectedReq?.reqName)?.file?.url || ['Practicum kit (expanded envelope)', 'Attendance OJT Orientation'].includes(selectedReq?.reqName || ''))} onClick={() => handleReviewAction('Approved')}
                 className="bg-green-600 hover:bg-green-700 text-white font-semibold cursor-pointer"
               >
                 <Check className="h-3.5 w-3.5 mr-1" /> Approve Requirement
               </Button>
             </DialogFooter>
-          </DialogContent>
+          </DocumentReviewWorkspace>
+</DialogContent>
         </Dialog>
       )}
 
-      <RequirementFilePreviewDialog
-        preview={previewReq}
-        onOpenChange={(open) => {
-          if (!open) setPreviewReq(null);
-        }}
-      />
+      
     </div>
   );
 }

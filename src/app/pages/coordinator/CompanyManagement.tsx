@@ -1,5 +1,6 @@
+import {useCoordinatorModuleData} from '../../context/CoordinatorModuleData';
 import React, { useState } from 'react';
-import { useOJT, Company } from '../../context/OJTContext';
+import { Company } from '../../context/OJTContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -26,7 +27,7 @@ import {
 } from '../../components/ui/dialog';
 
 export function CompanyManagement() {
-  const { companies, addCompany, students } = useOJT();
+  const { companies, addCompany, students } = useCoordinatorModuleData();
   const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   // Form states
@@ -39,11 +40,12 @@ export function CompanyManagement() {
   const [longitude, setLongitude] = useState(121.0244);
   const [allowedRadius, setAllowedRadius] = useState(200);
 
-  const handleAddCompanySubmit = (e: React.FormEvent) => {
+  const handleAddCompanySubmit = async (e: React.FormEvent) => {
+    try {
     e.preventDefault();
     if (!name.trim() || !address.trim() || !email.trim()) return;
 
-    addCompany({
+    await addCompany({
       name,
       address,
       contactPerson,
@@ -57,6 +59,8 @@ export function CompanyManagement() {
     toast.success(`HTE Partner: ${name} added! Geofence boundaries configured.`);
     setAddDialogOpen(false);
     clearForm();
+  
+    } catch(error) { toast.error(error instanceof Error?error.message:"Unable to save. Please retry."); }
   };
 
   const clearForm = () => {
@@ -72,6 +76,7 @@ export function CompanyManagement() {
 
   return (
     <div className="space-y-6 font-sans">
+      <p role="status" className="text-xs text-slate-500">The company directory is awaiting its backend adapter. Saved placements remain in Supabase.</p>
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-sans">Company & Deployment</h1>
@@ -130,7 +135,7 @@ export function CompanyManagement() {
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setAddDialogOpen(false)}>Cancel</Button>
-                <Button type="submit" className="bg-[#800000] hover:bg-[#6b0000] text-white">Save Company</Button>
+                <Button disabled title="Company directory editing is not connected yet" type="submit" className="bg-[#800000] hover:bg-[#6b0000] text-white">Save Company</Button>
               </DialogFooter>
             </form>
           </DialogContent>

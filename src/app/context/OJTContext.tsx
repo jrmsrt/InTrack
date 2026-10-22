@@ -1,24 +1,51 @@
+import { createRequirementChecklist } from '../domain/requirementChecklist';
+import type { UploadedDocument } from '../lib/uploadedDocument';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth, AuthorizedStudent } from './AuthContext';
 import { loadApiState, saveApiState } from '../lib/apiState';
 import { initialAuthorizedStudents as uploadedAuthorizedStudents } from '../data/initialAuthorizedStudents';
+import { moaStatuses, type MoaStatus } from '../domain/contracts';
+import { canSetMoaStatus, moaIsAccepted } from '../domain/policy';
+import { addedPreOJTRequirements, addedPostOJTRequirements, appendMissingRequirements } from '../domain/portfolioContents';
 
 // Define OJT Stages
 export type OJTStage = 'Stage 1: Pre-OJT' | 'Stage 2: During OJT' | 'Stage 3: Post-OJT' | 'Stage 4: Portfolio Completion';
+export type CoordinatorReviewStatus = 'Pending' | 'Verified' | 'Needs Attention';
+export type RequirementStage = 'pre' | 'during' | 'post';
+
+export interface ReviewHistoryEntry {
+  role: 'Student' | 'Adviser' | 'Coordinator';
+  action: string;
+  remarks: string;
+  timestamp: string;
+}
 
 export interface RequirementItem {
+  description?: string;
   name: string;
   status: 'Not Submitted' | 'Submitted' | 'Under Review' | 'Needs Revision' | 'Approved' | 'Rejected';
   fileName: string | null;
+  file?: UploadedDocument | null;
   remarks: string;
+  submittedAt?: string;
+  reviewedAt?: string;
+  revisionCount?: number;
   updatedAt?: string;
+  coordinatorStatus?: CoordinatorReviewStatus;
+  coordinatorRemarks?: string;
+  coordinatorReviewedAt?: string;
+  reviewHistory?: ReviewHistoryEntry[];
 }
 
 export interface MOAState {
-  status: 'NO MOA' | 'FOR COMPANY REVIEW' | 'IN-PROCESS FOR REVISION' | 'IN-PROCESS FOR REVIEW OF ULCO' | 'FOR NOTARIZATION' | 'SIGNED AND NOTARIZED' | 'SAS COPY';
+  status: MoaStatus;
+  pendingUpload?: { fileName: string; file: UploadedDocument | null; submittedAt: string };
   fileName: string | null;
+  file?: UploadedDocument | null;
   remarks: string;
   timeline: { date: string; status: string; remarks: string }[];
+  submittedAt?: string;
+  reviewedAt?: string;
 }
 
 export interface AttendanceRecord {
@@ -33,6 +60,22 @@ export interface AttendanceRecord {
   remarks: string;
   deviceInfo: string;
   attendanceStatus: 'Present' | 'Incomplete Time Out' | 'Location Verified' | 'Outside Deployment Area' | 'Late' | 'Absent';
+  correction?: AttendanceCorrection;
+}
+
+export interface AttendanceCorrection {
+  id: string;
+  originalTimeIn: string;
+  originalTimeOut: string | null;
+  requestedTimeIn: string;
+  requestedTimeOut: string | null;
+  reason: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  requestedAt: string;
+  approver?: string;
+  decidedAt?: string;
+  decisionRemarks?: string;
+  auditTrail: { action: string; actor: string; timestamp: string; details: string }[];
 }
 
 export interface DTRRecord {
@@ -40,11 +83,20 @@ export interface DTRRecord {
   month: string;
   startDate: string;
   endDate: string;
-  status: 'Draft' | 'Generated' | 'Submitted' | 'Under Review' | 'Needs Revision' | 'Approved';
+  status: 'Draft' | 'Generated' | 'Submitted' | 'Under Review' | 'Needs Revision' | 'Revision Requested' | 'Approved';
   remarks: string;
+  ojtAssignmentId?: string;
+  adviserId?: string;
+  generatedAt?: string;
   submittedAt?: string;
+  reviewedAt?: string;
+  includedAttendanceRecordIds?: string[];
+  version?: number;
+  revisionCount?: number;
+  reviewHistory?: { action: string; remarks: string; timestamp: string }[];
   totalHours: number;
   logs: {
+    attendanceRecordId?: string;
     date: string;
     timeIn: string;
     timeOut: string | null;
@@ -80,6 +132,7 @@ export interface WeeklyJournal {
   totalHours: number;
   status: 'Draft' | 'Submitted' | 'Needs Revision' | 'Approved';
   remarks?: string;
+  submittedAt?: string;
 }
 
 export interface EvaluationForm {
@@ -103,6 +156,17 @@ export interface Company {
   latitude: number;
   longitude: number;
   allowedRadius: number; // in meters
+}
+
+export interface HTEPartner {
+  id: string;
+  companyName: string;
+  address: string;
+  supervisorName: string;
+  email: string;
+  phone: string;
+  dateNotarized: string;
+  status: 'Active' | 'Pending' | 'Archived';
 }
 
 export interface StudentOJTProfile {
@@ -132,6 +196,12 @@ export interface StudentOJTProfile {
   portfolioApproved: boolean;
   portfolioRemarks: string;
   portfolioSubmitted: boolean;
+  portfolioSubmittedAt?: string;
+  portfolioAdviserReviewedAt?: string;
+  coordinatorPortfolioStatus?: 'Pending' | 'Approved' | 'Needs Revision';
+  coordinatorPortfolioRemarks?: string;
+  coordinatorPortfolioReviewedAt?: string;
+  portfolioReviewHistory?: ReviewHistoryEntry[];
 }
 
 export interface Announcement {
@@ -159,6 +229,10 @@ export interface Message {
 
 export interface Template {
   id: string;
+  programId?: string;
+  programCode?: string;
+  revision?: number;
+  backendTemplate?: boolean;
   name: string;
   category: 'Pre-OJT' | 'During-OJT' | 'Post-OJT' | 'Portfolio' | 'Evaluation';
   description: string;
@@ -167,9 +241,17 @@ export interface Template {
   lastUpdated: string;
 }
 
-interface OJTContextType {
+export interface OJTContextType {
+  isBackendConnected?: boolean;
+  studentEnrollmentStatus?: 'not_enrolled' | 'enrolled';
+  availableAdviserPaths?: string[];
+  refreshStudentRecords?: () => void;
+  uploadRequirementFile?: (stage: RequirementStage, name: string, file: File) => Promise<void>;
+  submitPhysicalRequirement?: (stage: RequirementStage, name: string, note: string) => Promise<void>;
+  savedNotifications?: {id:string;title:string;body:string;createdAt:string;unread:boolean}[];
   students: StudentOJTProfile[];
   companies: Company[];
+  htePartners: HTEPartner[];
   announcements: Announcement[];
   messages: Message[];
   templates: Template[];
@@ -185,16 +267,19 @@ interface OJTContextType {
   // Core Functions
   timeIn: (studentId: string, mockGps: { lat: number; lng: number } | null, deviceInfo?: string) => { success: boolean; message: string };
   timeOut: (studentId: string, mockGps: { lat: number; lng: number } | null, deviceInfo?: string) => { success: boolean; message: string };
+  requestAttendanceCorrection: (studentId: string, attendanceId: string, requestedTimeIn: string, requestedTimeOut: string | null, reason: string, requester: string) => { success: boolean; message: string };
   submitDailyTask: (studentId: string, task: Omit<DailyTask, 'id' | 'status'>) => void;
   deleteDailyTask: (studentId: string, taskId: string) => void;
   updateDailyTask: (studentId: string, task: DailyTask) => void;
   submitWeeklyJournal: (studentId: string, journal: Omit<WeeklyJournal, 'id' | 'status'>) => void;
   updateWeeklyJournal: (studentId: string, journalId: string, updates: Partial<WeeklyJournal>) => void;
-  uploadPreOJTReq: (studentId: string, reqName: string, fileName: string) => void;
-  uploadDuringOJTReq: (studentId: string, reqName: string, fileName: string) => void;
-  uploadPostOJTReq: (studentId: string, reqName: string, fileName: string) => void;
-  uploadMOA: (studentId: string, fileName: string) => void;
+  uploadPreOJTReq: (studentId: string, reqName: string, fileName: string, file?: UploadedDocument | null) => void;
+  uploadDuringOJTReq: (studentId: string, reqName: string, fileName: string, file?: UploadedDocument | null) => void;
+  uploadPostOJTReq: (studentId: string, reqName: string, fileName: string, file?: UploadedDocument | null) => void;
+  uploadMOA: (studentId: string, fileName: string, file?: UploadedDocument | null) => void;
   submitPortfolio: (studentId: string) => void;
+  generateDTR: (studentId: string, month: string, startDate: string, endDate: string, logs: DTRRecord['logs'], attendanceRecordIds: string[]) => DTRRecord | null;
+  submitGeneratedDTR: (studentId: string, dtrId: string) => void;
   submitDTR: (studentId: string, month: string, startDate: string, endDate: string, logs: DTRRecord['logs']) => void;
   updateDTRStatus: (studentId: string, dtrId: string, status: DTRRecord['status'], remarks: string) => void;
   
@@ -202,17 +287,22 @@ interface OJTContextType {
   reviewPreOJTReq: (studentId: string, reqName: string, status: RequirementItem['status'], remarks: string) => void;
   reviewDuringOJTReq: (studentId: string, reqName: string, status: RequirementItem['status'], remarks: string) => void;
   reviewPostOJTReq: (studentId: string, reqName: string, status: RequirementItem['status'], remarks: string) => void;
-  reviewMOA: (studentId: string, status: MOAState['status'], remarks: string) => void;
+  reviewMOA: (studentId: string, status: MOAState['status'], remarks: string) => { success: boolean; error?: string };
   reviewDailyTask: (studentId: string, taskId: string, status: DailyTask['status'], remarks: string) => void;
   reviewWeeklyJournal: (studentId: string, journalId: string, status: WeeklyJournal['status'], remarks: string) => void;
   reviewPortfolio: (studentId: string, status: 'Approved' | 'Needs Revision', remarks: string) => void;
   submitStudentEvaluation: (studentId: string, type: 'midterm' | 'final', evaluation: EvaluationForm) => void;
+  reviewAttendanceCorrection: (studentId: string, attendanceId: string, decision: 'Approved' | 'Rejected', approver: string, remarks: string) => void;
   
   // Coordinator Functions
+  reviewCoordinatorRequirement: (studentId: string, stage: RequirementStage, reqName: string, status: CoordinatorReviewStatus, remarks: string) => void;
+  reviewCoordinatorPortfolio: (studentId: string, status: 'Approved' | 'Needs Revision', remarks: string) => void;
   addStudentProfile: (profile: Omit<StudentOJTProfile, 'stage' | 'preOJTRequirements' | 'moaState' | 'attendanceHistory' | 'dailyTasks' | 'weeklyJournals' | 'duringOJTRequirements' | 'postOJTRequirements' | 'midtermEvaluation' | 'finalEvaluation' | 'portfolioApproved' | 'portfolioRemarks' | 'portfolioSubmitted'>) => void;
   updateStudentProfile: (studentId: string, updates: Partial<StudentOJTProfile>) => void;
   addCompany: (comp: Omit<Company, 'id'>) => void;
   updateCompany: (compId: string, updates: Partial<Company>) => void;
+  addHTEPartner: (partner: Omit<HTEPartner, 'id'>) => void;
+  updateHTEPartner: (partnerId: string, updates: Partial<HTEPartner>) => void;
   addTemplate: (temp: Omit<Template, 'id' | 'lastUpdated'>) => void;
   updateTemplate: (tempId: string, updates: Partial<Template>) => void;
   addAnnouncement: (ann: Omit<Announcement, 'id' | 'publishDate'>) => void;
@@ -230,51 +320,9 @@ const OJTContext = createContext<OJTContextType | undefined>(undefined);
 const OJT_STATE_KEY = 'ojt';
 
 // Default checklists according to coordinator requirements
-const defaultPreOJTChecklist: RequirementItem[] = [
-  'Certificate of Registration (COR)',
-  'Resume',
-  'Notarize Memorandum of Agreement (MOA)',
-  'Endorsement/Recommendation Letter',
-  'Notarized Waiver/Consent Form',
-  'Notarized Internship Agreement',
-  'Student Practicum Plan',
-  'Medical Certificate',
-  'Good Moral Certificate',
-  'Certificate of Insurance',
-  'Certificate (Sexual Harassment and Work Ethics)',
-  'SIS grades (1st year to 3rd year)',
-  'Practicum kit (expanded envelope)',
-  'Attendance OJT Orientation'
-].map(name => ({
-  name,
-  status: 'Not Submitted',
-  fileName: null,
-  remarks: '',
-}));
-
-const defaultDuringOJTChecklist: RequirementItem[] = [
-  'Daily Time Record',
-  'Self-Reflection',
-  ...Array.from({ length: 12 }, (_, i) => `Weekly Journal (Week ${i + 1})`),
-  ...Array.from({ length: 12 }, (_, i) => `Pictures / Documentation (Week ${i + 1})`)
-].map(name => ({
-  name,
-  status: 'Not Submitted',
-  fileName: null,
-  remarks: '',
-}));
-
-const defaultPostOJTChecklist: RequirementItem[] = [
-  'Student Performance Evaluation',
-  'HTE Supervisor’s Evaluation',
-  'HTE Evaluation',
-  'Certificate of Completion'
-].map(name => ({
-  name,
-  status: 'Not Submitted',
-  fileName: null,
-  remarks: '',
-}));
+const defaultPreOJTChecklist: RequirementItem[] = createRequirementChecklist('pre');
+const defaultDuringOJTChecklist: RequirementItem[] = createRequirementChecklist('during');
+const defaultPostOJTChecklist: RequirementItem[] = createRequirementChecklist('post');
 
 const defaultEvaluationCriteria = [
   { id: '1', criteriaName: 'Quality of Work / Accuracy', maxPoints: 20, score: 0 },
@@ -323,6 +371,8 @@ function createStudentProfile(student: AuthorizedStudent): StudentOJTProfile {
   let portfolioSubmitted = false;
   let portfolioApproved = false;
   let portfolioRemarks = '';
+  let portfolioSubmittedAt: string | undefined;
+  let coordinatorPortfolioStatus: StudentOJTProfile['coordinatorPortfolioStatus'];
 
   if (isJaira) {
     preOJTRequirements = defaultPreOJTChecklist.map(req => {
@@ -366,7 +416,8 @@ function createStudentProfile(student: AuthorizedStudent): StudentOJTProfile {
         problems: 'No major issues.',
         totalHours: 40,
         status: 'Submitted',
-        remarks: ''
+        remarks: '',
+        submittedAt: '2026-06-05T17:00:00+08:00'
       },
       {
         id: 'wj_kate_2',
@@ -378,12 +429,13 @@ function createStudentProfile(student: AuthorizedStudent): StudentOJTProfile {
         problems: 'Faced minor issues with MySQL connection pools.',
         totalHours: 40,
         status: 'Submitted',
-        remarks: ''
+        remarks: '',
+        submittedAt: '2026-06-12T17:00:00+08:00'
       }
     ];
   } else if (isFarhana) {
     stage = 'Stage 3: Post-OJT';
-    totalHoursRendered = 480;
+    totalHoursRendered = 500;
     preOJTRequirements = defaultPreOJTChecklist.map(req => ({ ...req, status: 'Approved', remarks: 'Approved.' }));
     moaState = {
       status: 'SIGNED AND NOTARIZED',
@@ -394,13 +446,13 @@ function createStudentProfile(student: AuthorizedStudent): StudentOJTProfile {
     duringOJTRequirements = defaultDuringOJTChecklist.map(req => ({ ...req, status: 'Approved', remarks: 'Approved.' }));
     postOJTRequirements = defaultPostOJTChecklist.map(req => {
       if (req.name === 'Certificate of Completion') {
-        return { ...req, status: 'Submitted', fileName: 'COC_Farhana_Alim.pdf', remarks: 'Finished 480 hours.' };
+        return { ...req, status: 'Submitted', fileName: 'COC_Farhana_Alim.pdf', remarks: 'Finished 500 hours.' };
       }
       return { ...req };
     });
   } else if (isMarion) {
     stage = 'Stage 4: Portfolio Completion';
-    totalHoursRendered = 480;
+    totalHoursRendered = 500;
     preOJTRequirements = defaultPreOJTChecklist.map(req => ({ ...req, status: 'Approved', remarks: 'Approved.' }));
     moaState = {
       status: 'SIGNED AND NOTARIZED',
@@ -413,9 +465,11 @@ function createStudentProfile(student: AuthorizedStudent): StudentOJTProfile {
     portfolioSubmitted = true;
     portfolioApproved = false;
     portfolioRemarks = 'Please review my completed portfolio compilation.';
+    portfolioSubmittedAt = '2026-09-05T09:30:00+08:00';
+    coordinatorPortfolioStatus = 'Pending';
   }
 
-  return {
+  return seedJairaDtrDemo({
     studentId: `student-${student.studentNumber}`,
     studentNumber: student.studentNumber,
     name: formatNameWithMiddleInitial(student.name),
@@ -428,7 +482,7 @@ function createStudentProfile(student: AuthorizedStudent): StudentOJTProfile {
     companyName: 'TechCorp Inc.',
     stage,
     totalHoursRendered,
-    requiredHours: 480,
+    requiredHours: 500,
     preOJTRequirements,
     moaState,
     attendanceHistory: [],
@@ -442,6 +496,54 @@ function createStudentProfile(student: AuthorizedStudent): StudentOJTProfile {
     portfolioApproved,
     portfolioRemarks,
     portfolioSubmitted,
+    portfolioSubmittedAt,
+    coordinatorPortfolioStatus,
+  });
+}
+
+function seedJairaDtrDemo(profile: StudentOJTProfile): StudentOJTProfile {
+  // Seed once; loading existing demo records must preserve coordinator decisions.
+  if (profile.attendanceHistory.some(record => record.id.startsWith('jaira-dtr-demo-'))) return profile;
+  if (profile.email.toLowerCase() !== 'jairarmasarate@iskolarngbayan.pup.edu.ph') return profile;
+
+  const attendance = profile.attendanceHistory.some(record => record.id.startsWith('jaira-dtr-demo-')) ? profile.attendanceHistory : [
+    ...profile.attendanceHistory,
+    ...['2026-07-01', '2026-07-02', '2026-07-03', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07', '2026-09-01', '2026-09-02'].map((date, index): AttendanceRecord => ({
+      id: `jaira-dtr-demo-${date}`,
+      studentId: profile.studentId,
+      date,
+      timeIn: '08:00 AM',
+      timeOut: '05:00 PM',
+      totalHours: 8,
+      locationStatus: 'Location Verified',
+      gpsCoordinates: { lat: 14.55472, lng: 121.02444 },
+      remarks: 'Verified demo attendance for DTR generation.',
+      deviceInfo: 'Seeded DTR demo record',
+      attendanceStatus: index === 1 ? 'Late' : 'Present',
+    })),
+    {
+      id: 'jaira-dtr-demo-2026-09-03-incomplete', studentId: profile.studentId, date: '2026-09-03', timeIn: '08:05 AM', timeOut: null, totalHours: 0,
+      locationStatus: 'Attendance Recorded', gpsCoordinates: { lat: 14.55472, lng: 121.02444 }, remarks: 'Missing time out — resolve before regenerating September DTR.', deviceInfo: 'Seeded DTR demo record', attendanceStatus: 'Incomplete Time Out',
+    },
+  ];
+  const toLog = (record: AttendanceRecord): DTRRecord['logs'][number] => ({ attendanceRecordId: record.id, date: record.date, timeIn: record.timeIn, timeOut: record.timeOut, totalHours: record.totalHours, locationStatus: record.locationStatus, gpsCoordinates: record.gpsCoordinates });
+  const history = profile.dtrHistory.some(dtr => dtr.id.startsWith('jaira-dtr-demo-')) ? profile.dtrHistory : [
+    ...profile.dtrHistory,
+    {
+      id: 'jaira-dtr-demo-july-v1', month: 'July 2026', startDate: '2026-07-01', endDate: '2026-07-31', status: 'Needs Revision', remarks: 'Please correct the missing time-out record before resubmitting.', ojtAssignmentId: profile.companyId, adviserId: profile.adviserId, generatedAt: '2026-07-31T09:00:00.000Z', submittedAt: '2026-07-31T10:00:00.000Z', reviewedAt: '2026-08-01T02:00:00.000Z', includedAttendanceRecordIds: attendance.filter(record => record.date.startsWith('2026-07')).map(record => record.id), version: 1, revisionCount: 1, reviewHistory: [{ action: 'Generated', remarks: 'Generated from verified attendance.', timestamp: '2026-07-31T09:00:00.000Z' }, { action: 'Submitted', remarks: 'Submitted to adviser.', timestamp: '2026-07-31T10:00:00.000Z' }, { action: 'Needs Revision', remarks: 'Please correct the missing time-out record before resubmitting.', timestamp: '2026-08-01T02:00:00.000Z' }], totalHours: 24, logs: attendance.filter(record => record.date.startsWith('2026-07')).map(toLog),
+    },
+    {
+      id: 'jaira-dtr-demo-august-v1', month: 'August 2026', startDate: '2026-08-01', endDate: '2026-08-31', status: 'Approved', remarks: 'Verified and approved by adviser.', ojtAssignmentId: profile.companyId, adviserId: profile.adviserId, generatedAt: '2026-08-31T09:00:00.000Z', submittedAt: '2026-08-31T10:00:00.000Z', reviewedAt: '2026-09-01T02:00:00.000Z', includedAttendanceRecordIds: attendance.filter(record => record.date.startsWith('2026-08')).map(record => record.id), version: 1, revisionCount: 0, reviewHistory: [{ action: 'Generated', remarks: 'Generated from verified attendance.', timestamp: '2026-08-31T09:00:00.000Z' }, { action: 'Submitted', remarks: 'Submitted to adviser.', timestamp: '2026-08-31T10:00:00.000Z' }, { action: 'Approved', remarks: 'Verified and approved by adviser.', timestamp: '2026-09-01T02:00:00.000Z' }], totalHours: 40, logs: attendance.filter(record => record.date.startsWith('2026-08')).map(toLog),
+    },
+  ];
+  return {
+    ...profile,
+    stage: 'Stage 2: During OJT',
+    totalHoursRendered: Math.max(profile.totalHoursRendered, attendance.filter(record => record.totalHours > 0).reduce((total, record) => total + record.totalHours, 0)),
+    preOJTRequirements: profile.preOJTRequirements.map(requirement => addedPreOJTRequirements.some(name => name === requirement.name) ? requirement : ({ ...requirement, status: 'Approved', remarks: 'Approved for DTR lifecycle verification.' })),
+    moaState: { ...profile.moaState, status: 'SIGNED AND NOTARIZED', remarks: 'Approved for DTR lifecycle verification.' },
+    attendanceHistory: attendance,
+    dtrHistory: history,
   };
 }
 
@@ -460,6 +562,7 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<{
     students: StudentOJTProfile[];
     companies: Company[];
+    htePartners: HTEPartner[];
     announcements: Announcement[];
     messages: Message[];
     templates: Template[];
@@ -508,6 +611,59 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
       }
     ];
 
+    const defaultHTEPartners: HTEPartner[] = [
+      {
+        id: 'hte1',
+        companyName: 'TechCorp Inc.',
+        address: '14 Innovation Drive, Makati City',
+        supervisorName: 'Michael Chen',
+        email: 'contact@techcorp.com',
+        phone: '0917 555 0202',
+        dateNotarized: '2025-06-15',
+        status: 'Active',
+      },
+      {
+        id: 'hte2',
+        companyName: 'Northstar Analytics',
+        address: '88 Cyber Boulevard, Quezon City',
+        supervisorName: 'Anna Cruz',
+        email: 'hr@northstar.io',
+        phone: '0918 222 3344',
+        dateNotarized: '2025-08-20',
+        status: 'Active',
+      },
+      {
+        id: 'hte3',
+        companyName: 'City IT Office',
+        address: 'Municipal Hall, Pasig City',
+        supervisorName: 'Engr. Raul Gomez',
+        email: 'pasigit@pasig.gov.ph',
+        phone: '0905 888 1234',
+        dateNotarized: '2024-11-12',
+        status: 'Active',
+      },
+      {
+        id: 'hte4',
+        companyName: 'Apex Digital Solutions',
+        address: '22 Orchard Road, Pasig City',
+        supervisorName: 'Mark Spencer',
+        email: 'contact@apex.com',
+        phone: '0988 777 6655',
+        dateNotarized: 'PENDING REVIEW',
+        status: 'Pending',
+      },
+      {
+        id: 'hte5',
+        companyName: 'OldTech Corporation',
+        address: '99 Old Avenue, Manila',
+        supervisorName: 'John Doe',
+        email: 'oldtech@domain.com',
+        phone: '0900 111 2222',
+        dateNotarized: 'EXPIRED (2025-05-10)',
+        status: 'Archived',
+      },
+    ];
+
     // Pre-populate Student profiles with some approved/submitted items
     const initialStudentProfiles: StudentOJTProfile[] = uploadedAuthorizedStudents.map(createStudentProfile);
 
@@ -533,14 +689,21 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
     ];
 
     const defaultTemplates: Template[] = [
-      { id: 't1', name: 'Resume Standard Template', category: 'Pre-OJT', description: 'Official outline for student resumes.', linkUrl: '#', status: 'Published', lastUpdated: '2026-05-10' },
-      { id: 't2', name: 'Parent Consent & Waiver Form', category: 'Pre-OJT', description: 'Notarized parental permission template.', linkUrl: '#', status: 'Published', lastUpdated: '2026-05-12' },
-      { id: 't3', name: 'Memorandum of Agreement (HTE Model)', category: 'Pre-OJT', description: 'MOA template for companies to review.', linkUrl: '#', status: 'Published', lastUpdated: '2026-05-15' },
-      { id: 't4', name: 'Weekly Journal Official Layout', category: 'During-OJT', description: 'Weekly accomplishment log template.', linkUrl: '#', status: 'Published', lastUpdated: '2026-05-20' },
-      { id: 't5', name: 'Daily Time Record Log Sheet', category: 'During-OJT', description: 'Excel-like time sheet format.', linkUrl: '#', status: 'Published', lastUpdated: '2026-05-22' },
-      { id: 't6', name: 'OJT Student Self-Assessment', category: 'Post-OJT', description: 'Form to evaluate student learning outcomes.', linkUrl: '#', status: 'Published', lastUpdated: '2026-06-01' },
-      { id: 't7', name: 'Evaluation Form (Training Supervisor)', category: 'Post-OJT', description: 'Company feedback grading paper.', linkUrl: '#', status: 'Published', lastUpdated: '2026-06-01' },
-      { id: 't8', name: 'Final Portfolio Compiler Layout', category: 'Portfolio', description: 'Final compilation blueprint.', linkUrl: '#', status: 'Published', lastUpdated: '2026-06-05' },
+      { id: 't1', name: 'Pre-OJT Requirements Checklist', category: 'Pre-OJT', description: 'Checklist of requirements to complete before deployment.', linkUrl: 'https://drive.google.com/file/d/1cytqwLtfoy1hTMAtQQEQBgbxMOHDgK_f/view?usp=drive_link', status: 'Published', lastUpdated: '2026-05-10' },
+      { id: 't2', name: 'Parent Consent & Waiver Form', category: 'Pre-OJT', description: 'Notarized parental permission template.', linkUrl: 'https://docs.google.com/document/d/1Tlob2HvS0RhAaZwYQszSypwBV8jndk8w/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-05-12' },
+      { id: 't3', name: 'Memorandum of Agreement (HTE Model)', category: 'Pre-OJT', description: 'MOA template for companies to review.', linkUrl: 'https://docs.google.com/document/d/1A_3zSLiUpLxNSmEYj03WWhszT1_W7rPb/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-05-15' },
+      { id: 't4', name: 'Weekly Journal Official Layout', category: 'During-OJT', description: 'Weekly accomplishment log template.', linkUrl: 'https://docs.google.com/document/d/1XzumsAU-vdbzNSx5PqMAi8IlwotT8Wyd/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-05-20' },
+      { id: 't5', name: 'Daily Time Record Log Sheet', category: 'During-OJT', description: 'Daily attendance record template for HTE verification.', linkUrl: 'https://docs.google.com/document/d/1BlNjqPliq7w4IvGHApA7Y9Wf0cZUEuyv/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-05-22' },
+      { id: 't6', name: 'HTE Evaluation Form', category: 'Post-OJT', description: 'Host Training Establishment evaluation form.', linkUrl: 'https://docs.google.com/document/d/1y70ljUvnhhcuphVlmu7flycEmHz0J8DM/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-06-01' },
+      { id: 't7', name: 'OJT Student Evaluation Form', category: 'Post-OJT', description: 'Student evaluation form for post-OJT completion.', linkUrl: 'https://docs.google.com/document/d/1rJV55UVuZgAEcioWRfeHRtC4vWjs_Kn5/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-06-01' },
+      { id: 't8', name: 'Final Portfolio Compiler Layout', category: 'Portfolio', description: 'Final compilation blueprint.', linkUrl: 'https://docs.google.com/document/d/1WGtNJmNtuu8aSH2p7ZMUKFvlJ3JifDzM/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-06-05' },
+      { id: 't9', name: 'Internship Agreement Template', category: 'Pre-OJT', description: 'Agreement template confirming student, university, and HTE responsibilities.', linkUrl: 'https://docs.google.com/document/d/1urYpXNmm3FEqohvttEHpibtJVAdPUHUR/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-05-12' },
+      { id: 't10', name: 'Endorsement/Recommendation Letter Template', category: 'Pre-OJT', description: 'Official endorsement letter template for internship applications.', linkUrl: 'https://docs.google.com/document/d/1stp4vDdC3jdBDrE-paRJK3D3A5rIj_YM/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-05-12' },
+      { id: 't11', name: 'Practicum Plan Letter Template', category: 'Pre-OJT', description: 'Template letter for practicum plan details.', linkUrl: 'https://docs.google.com/document/d/1qFO7wjDSz4X60fj-bbWM7DLnIK28Ebc2/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-05-12' },
+      { id: 't12', name: 'OJT Supervisor Evaluation Form - BSIT', category: 'Post-OJT', description: 'Supervisor evaluation form for BSIT students.', linkUrl: 'https://docs.google.com/document/d/1IxNeRF1LN-2OHjGWgjjW4ByBUXlygli0/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-06-01' },
+      { id: 't13', name: 'OJT Supervisor Evaluation Form - BSOA', category: 'Post-OJT', description: 'Supervisor evaluation form for BSOA students.', linkUrl: 'https://docs.google.com/document/d/1z7oW3u81_23HgmuQKaymbT8mIWesZuKU/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-06-01' },
+      { id: 't14', name: 'Self-Reflection Template', category: 'Post-OJT', description: 'Self-reflection template for post-OJT completion.', linkUrl: 'https://docs.google.com/document/d/1wMzLb6Nm65-mRxLc0GdfSJesnXZ5f7aS/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-06-01' },
+      { id: 't15', name: 'Reflective Journal Template', category: 'Post-OJT', description: 'Reflective journal template for internship learning and professional growth.', linkUrl: 'https://docs.google.com/document/d/1ipDpySKQK5TrdY9ymSGlRcrkK6Qc8S6C/edit?usp=sharing&ouid=108649410443671808721&rtpof=true&sd=true', status: 'Published', lastUpdated: '2026-06-01' },
     ];
 
     const defaultMessages: Message[] = [
@@ -574,6 +737,7 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
     return {
       students: sanitizedStudentProfiles,
       companies: defaultCompanies,
+      htePartners: defaultHTEPartners,
       announcements: defaultAnnouncements,
       messages: defaultMessages,
       templates: defaultTemplates,
@@ -581,7 +745,7 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
       systemSettings: {
         academicYear: '2025-2026',
         semester: 'Second Semester',
-        requiredHours: 480,
+        requiredHours: 500,
         defaultRadius: 200, // 200m
       }
     };
@@ -593,14 +757,32 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
     loadApiState<typeof state>(OJT_STATE_KEY)
       .then((databaseState) => {
         if (!isMounted) return;
-        if (databaseState) {
+        if (databaseState && typeof databaseState === 'object' && !Array.isArray(databaseState)) {
           const demoEmails = ['sarah.johnson@university.edu', 'david.martinez@university.edu', 'lisa.wang@university.edu'];
-          let filteredStudents = (databaseState.students || [])
-            .filter(s => !demoEmails.includes(s.email.toLowerCase()))
-            .map(s => ({
+          const persistedStudents = Array.isArray(databaseState.students) ? databaseState.students : [];
+          const filteredStudents = persistedStudents
+            .filter(s => typeof s?.email === 'string' && !demoEmails.includes(s.email.toLowerCase()))
+            .map(s => seedJairaDtrDemo({
               ...s,
-              name: formatNameWithMiddleInitial(s.name)
-            }));
+              name: formatNameWithMiddleInitial(typeof s.name === 'string' ? s.name : ''),
+              preOJTRequirements: appendMissingRequirements<RequirementItem>(Array.isArray(s.preOJTRequirements) ? s.preOJTRequirements : [], addedPreOJTRequirements, name => ({name, status:'Not Submitted', fileName:null, remarks:''})),
+              duringOJTRequirements: Array.isArray(s.duringOJTRequirements) ? s.duringOJTRequirements : [],
+              postOJTRequirements: appendMissingRequirements<RequirementItem>(Array.isArray(s.postOJTRequirements) ? s.postOJTRequirements : [], addedPostOJTRequirements, name => ({name, status:'Not Submitted', fileName:null, remarks:''})),
+              attendanceHistory: Array.isArray(s.attendanceHistory) ? s.attendanceHistory : [],
+              dtrHistory: Array.isArray(s.dtrHistory) ? s.dtrHistory : [],
+              dailyTasks: Array.isArray(s.dailyTasks) ? s.dailyTasks : [],
+              weeklyJournals: Array.isArray(s.weeklyJournals) ? s.weeklyJournals : [],
+              moaState: {
+                status: moaStatuses.includes(s.moaState?.status) ? s.moaState.status : 'NO MOA',
+                pendingUpload: s.moaState?.pendingUpload,
+                fileName: s.moaState?.fileName || null,
+                file: s.moaState?.file ?? null,
+                remarks: s.moaState?.remarks || '',
+                timeline: Array.isArray(s.moaState?.timeline) ? s.moaState.timeline : [],
+                submittedAt: s.moaState?.submittedAt,
+                reviewedAt: s.moaState?.reviewedAt,
+              },
+            } as StudentOJTProfile));
 
           const existingEmails = new Set(filteredStudents.map(s => s.email.toLowerCase()));
           const defaultStudentProfiles: StudentOJTProfile[] = uploadedAuthorizedStudents
@@ -608,8 +790,27 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
             .map(createStudentProfile);
 
           setState({
+            ...state,
             ...databaseState,
-            students: [...filteredStudents, ...defaultStudentProfiles]
+            students: [...filteredStudents, ...defaultStudentProfiles],
+            companies: Array.isArray(databaseState.companies) ? databaseState.companies : state.companies,
+            htePartners: Array.isArray((databaseState as any).htePartners) ? (databaseState as any).htePartners : state.htePartners,
+            announcements: Array.isArray(databaseState.announcements) ? databaseState.announcements : state.announcements,
+            messages: Array.isArray(databaseState.messages) ? databaseState.messages : state.messages,
+            templates: Array.isArray(databaseState.templates)
+              ? [
+                  ...databaseState.templates.map(template => {
+                    const seededTemplate = state.templates.find(defaultTemplate => defaultTemplate.id === template.id);
+                    return template.linkUrl === '#' && seededTemplate ? { ...template, linkUrl: seededTemplate.linkUrl } : template;
+                  }),
+                  ...state.templates.filter(defaultTemplate => !databaseState.templates.some(template => template.id === defaultTemplate.id))
+                ]
+              : state.templates,
+            evaluationFormConfigs: Array.isArray(databaseState.evaluationFormConfigs) ? databaseState.evaluationFormConfigs : state.evaluationFormConfigs,
+            systemSettings: {
+              ...state.systemSettings,
+              ...(databaseState.systemSettings && typeof databaseState.systemSettings === 'object' ? databaseState.systemSettings : {}),
+            },
           });
         }
       })
@@ -640,7 +841,7 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
   const checkStageLock = (profile: StudentOJTProfile): OJTStage => {
     // 1. Check Pre-OJT Requirements & MOA
     const allPreOJTApproved = profile.preOJTRequirements.every(req => req.status === 'Approved');
-    const moaApproved = profile.moaState.status === 'SIGNED AND NOTARIZED' || profile.moaState.status === 'SAS COPY';
+    const moaApproved = moaIsAccepted(profile.moaState.status);
     
     if (!allPreOJTApproved || !moaApproved) {
       return 'Stage 1: Pre-OJT';
@@ -694,6 +895,78 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return earthRadius * c;
+  };
+
+  const timeToMinutes = (value: string | null) => {
+    if (!value) return null;
+    const match = value.trim().match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
+    if (!match) return null;
+    let hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    const modifier = match[3]?.toUpperCase();
+    if (modifier === 'PM' && hours < 12) hours += 12;
+    if (modifier === 'AM' && hours === 12) hours = 0;
+    return hours * 60 + minutes;
+  };
+
+  const formatRequestedTime = (value: string | null) => {
+    if (!value) return null;
+    const minutes = timeToMinutes(value);
+    if (minutes === null) return value;
+    const hours = Math.floor(minutes / 60);
+    const minute = minutes % 60;
+    return `${hours % 12 || 12}:${String(minute).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
+  };
+
+  const requestAttendanceCorrection = (studentId: string, attendanceId: string, requestedTimeIn: string, requestedTimeOut: string | null, reason: string, requester: string) => {
+    const trimmedReason = reason.trim();
+    if (!trimmedReason) return { success: false, message: 'A reason for the correction is required.' };
+    if (timeToMinutes(requestedTimeIn) === null || (requestedTimeOut && timeToMinutes(requestedTimeOut) === null)) return { success: false, message: 'Enter valid requested times.' };
+    if (requestedTimeOut && timeToMinutes(requestedTimeOut)! <= timeToMinutes(requestedTimeIn)!) return { success: false, message: 'Requested time out must be later than requested time in.' };
+    const now = new Date().toISOString();
+    updateStudentState(studentId, s => ({
+      ...s,
+      attendanceHistory: s.attendanceHistory.map(record => record.id !== attendanceId ? record : {
+        ...record,
+        correction: {
+          id: `correction_${Date.now()}`,
+          originalTimeIn: record.timeIn,
+          originalTimeOut: record.timeOut,
+          requestedTimeIn: formatRequestedTime(requestedTimeIn) || requestedTimeIn,
+          requestedTimeOut: formatRequestedTime(requestedTimeOut),
+          reason: trimmedReason,
+          status: 'Pending',
+          requestedAt: now,
+          auditTrail: [{ action: 'Correction requested', actor: requester, timestamp: now, details: trimmedReason }],
+        },
+      }),
+    }));
+    return { success: true, message: 'Correction request submitted for adviser approval.' };
+  };
+
+  const reviewAttendanceCorrection = (studentId: string, attendanceId: string, decision: 'Approved' | 'Rejected', approver: string, remarks: string) => {
+    const now = new Date().toISOString();
+    updateStudentState(studentId, s => {
+      let hourAdjustment = 0;
+      const attendanceHistory = s.attendanceHistory.map(record => {
+        if (record.id !== attendanceId || record.correction?.status !== 'Pending') return record;
+        const correction: AttendanceCorrection = {
+          ...record.correction,
+          status: decision,
+          approver,
+          decidedAt: now,
+          decisionRemarks: remarks.trim(),
+          auditTrail: [...record.correction.auditTrail, { action: `Correction ${decision.toLowerCase()}`, actor: approver, timestamp: now, details: remarks.trim() || `Request ${decision.toLowerCase()}.` }],
+        };
+        if (decision !== 'Approved') return { ...record, correction };
+        const inMinutes = timeToMinutes(correction.requestedTimeIn);
+        const outMinutes = timeToMinutes(correction.requestedTimeOut);
+        const correctedHours = inMinutes !== null && outMinutes !== null ? Math.round(((outMinutes - inMinutes) / 60) * 100) / 100 : record.totalHours;
+        hourAdjustment = correctedHours - record.totalHours;
+        return { ...record, timeIn: correction.requestedTimeIn, timeOut: correction.requestedTimeOut, totalHours: correctedHours, remarks: `${record.remarks} Time correction approved by ${approver}.`, correction };
+      });
+      return { ...s, attendanceHistory, totalHoursRendered: Math.max(0, Math.round((s.totalHoursRendered + hourAdjustment) * 100) / 100) };
+    });
   };
 
   // 1. Time In Function
@@ -890,27 +1163,50 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
     return { success: true, message };
   };
 
-  // 2b. DTR Functions
-  const submitDTR = (studentId: string, month: string, startDate: string, endDate: string, logs: DTRRecord['logs']) => {
+  // 2b. DTR lifecycle. Generation snapshots verified attendance; submission is a separate action.
+  const generateDTR = (studentId: string, month: string, startDate: string, endDate: string, logs: DTRRecord['logs'], attendanceRecordIds: string[]) => {
+    let generated: DTRRecord | null = null;
     updateStudentState(studentId, s => {
-      const totalHours = logs.reduce((acc, log) => acc + log.totalHours, 0);
-      const newDtr: DTRRecord = {
+      const existingForPeriod = (s.dtrHistory || []).filter(d => d.month === month && d.startDate === startDate && d.endDate === endDate);
+      const version = Math.max(0, ...existingForPeriod.map(d => d.version || 1)) + 1;
+      const generatedAt = new Date().toISOString();
+      generated = {
         id: `dtr_${Date.now()}`,
         month,
         startDate,
         endDate,
-        status: 'Submitted',
+        status: 'Generated',
         remarks: '',
-        submittedAt: new Date().toISOString().split('T')[0],
-        totalHours,
-        logs
+        ojtAssignmentId: s.companyId,
+        adviserId: s.adviserId,
+        generatedAt,
+        includedAttendanceRecordIds: [...attendanceRecordIds],
+        version,
+        revisionCount: existingForPeriod.reduce((count, d) => count + (d.revisionCount || (d.status === 'Needs Revision' || d.status === 'Revision Requested' ? 1 : 0)), 0),
+        reviewHistory: [{ action: 'Generated', remarks: `Generated from ${logs.length} verified attendance records.`, timestamp: generatedAt }],
+        totalHours: logs.reduce((acc, log) => acc + log.totalHours, 0),
+        logs: logs.map(log => ({ ...log }))
       };
-
-      return {
-        ...s,
-        dtrHistory: [newDtr, ...(s.dtrHistory || [])]
-      };
+      return { ...s, dtrHistory: [generated!, ...(s.dtrHistory || [])] };
     });
+    return generated;
+  };
+
+  const submitGeneratedDTR = (studentId: string, dtrId: string) => {
+    updateStudentState(studentId, s => ({
+      ...s,
+      dtrHistory: (s.dtrHistory || []).map(d => {
+        if (d.id !== dtrId) return d;
+        const submittedAt = new Date().toISOString();
+        return { ...d, status: 'Submitted', submittedAt, reviewHistory: [...(d.reviewHistory || []), { action: 'Submitted', remarks: 'Submitted to adviser for review.', timestamp: submittedAt }] };
+      })
+    }));
+  };
+
+  // Legacy callers still produce a generated snapshot before formal submission.
+  const submitDTR = (studentId: string, month: string, startDate: string, endDate: string, logs: DTRRecord['logs']) => {
+    const generated = generateDTR(studentId, month, startDate, endDate, logs, logs.map(log => log.attendanceRecordId || `${log.date}-${log.timeIn}`));
+    if (generated) submitGeneratedDTR(studentId, generated.id);
   };
 
   const updateDTRStatus = (studentId: string, dtrId: string, status: DTRRecord['status'], remarks: string) => {
@@ -918,7 +1214,14 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
       return {
         ...s,
         dtrHistory: (s.dtrHistory || []).map(d =>
-          d.id === dtrId ? { ...d, status, remarks } : d
+        d.id === dtrId ? {
+          ...d,
+          status,
+          remarks,
+          reviewedAt: new Date().toISOString(),
+          revisionCount: status === 'Needs Revision' || status === 'Revision Requested' ? (d.revisionCount || 0) + 1 : d.revisionCount,
+          reviewHistory: [...(d.reviewHistory || []), { action: status, remarks, timestamp: new Date().toISOString() }]
+        } : d
         )
       };
     });
@@ -962,6 +1265,7 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
           ...journal,
           id: `journal_${Date.now()}`,
           status: 'Submitted',
+          submittedAt: new Date().toISOString(),
         },
         ...s.weeklyJournals
       ]
@@ -976,45 +1280,49 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Requirement uploads
-  const uploadPreOJTReq = (studentId: string, reqName: string, fileName: string) => {
+  const uploadPreOJTReq = (studentId: string, reqName: string, fileName: string, file?: UploadedDocument | null) => {
+    const submittedAt = new Date().toLocaleString();
     updateStudentState(studentId, s => ({
       ...s,
       preOJTRequirements: s.preOJTRequirements.map(r =>
-        r.name === reqName ? { ...r, status: 'Submitted', fileName, remarks: 'Uploaded file' } : r
+        r.name === reqName ? { ...r, status: 'Submitted', fileName, file: file ?? null, remarks: 'Uploaded file', submittedAt, updatedAt: submittedAt, coordinatorStatus: 'Pending', coordinatorRemarks: '', coordinatorReviewedAt: undefined, reviewHistory: [...(r.reviewHistory || []), { role: 'Student', action: r.submittedAt ? 'Resubmitted' : 'Submitted', remarks: `Uploaded ${fileName}.`, timestamp: submittedAt }] } : r
       )
     }));
   };
 
-  const uploadDuringOJTReq = (studentId: string, reqName: string, fileName: string) => {
+  const uploadDuringOJTReq = (studentId: string, reqName: string, fileName: string, file?: UploadedDocument | null) => {
+    const submittedAt = new Date().toLocaleString();
     updateStudentState(studentId, s => ({
       ...s,
       duringOJTRequirements: s.duringOJTRequirements.map(r =>
-        r.name === reqName ? { ...r, status: 'Submitted', fileName, remarks: 'Uploaded file' } : r
+        r.name === reqName ? { ...r, status: 'Submitted', fileName, file: file ?? null, remarks: 'Uploaded file', submittedAt, updatedAt: submittedAt, coordinatorStatus: 'Pending', coordinatorRemarks: '', coordinatorReviewedAt: undefined, reviewHistory: [...(r.reviewHistory || []), { role: 'Student', action: r.submittedAt ? 'Resubmitted' : 'Submitted', remarks: `Uploaded ${fileName}.`, timestamp: submittedAt }] } : r
       )
     }));
   };
 
-  const uploadPostOJTReq = (studentId: string, reqName: string, fileName: string) => {
+  const uploadPostOJTReq = (studentId: string, reqName: string, fileName: string, file?: UploadedDocument | null) => {
+    const submittedAt = new Date().toLocaleString();
     updateStudentState(studentId, s => ({
       ...s,
       postOJTRequirements: s.postOJTRequirements.map(r =>
-        r.name === reqName ? { ...r, status: 'Submitted', fileName, remarks: 'Uploaded file' } : r
+        r.name === reqName ? { ...r, status: 'Submitted', fileName, file: file ?? null, remarks: 'Uploaded file', submittedAt, updatedAt: submittedAt, coordinatorStatus: 'Pending', coordinatorRemarks: '', coordinatorReviewedAt: undefined, reviewHistory: [...(r.reviewHistory || []), { role: 'Student', action: r.submittedAt ? 'Resubmitted' : 'Submitted', remarks: `Uploaded ${fileName}.`, timestamp: submittedAt }] } : r
       )
     }));
   };
 
-  const uploadMOA = (studentId: string, fileName: string) => {
+  const uploadMOA = (studentId: string, fileName: string, file?: UploadedDocument | null) => {
     updateStudentState(studentId, s => {
       const today = new Date().toISOString().split('T')[0];
+      const submittedAt = new Date().toISOString();
       return {
         ...s,
         moaState: {
           ...s.moaState,
-          status: 'FOR COMPANY REVIEW',
-          fileName,
+          pendingUpload: { fileName, file: file ?? null, submittedAt },
+          submittedAt,
           timeline: [
             ...s.moaState.timeline,
-            { date: today, status: 'FOR COMPANY REVIEW', remarks: `Uploaded: ${fileName}` }
+            { date: today, status: s.moaState.status, remarks: `Uploaded for coordinator review: ${fileName}` }
           ]
         }
       };
@@ -1022,50 +1330,72 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
   };
 
   const submitPortfolio = (studentId: string) => {
+    const submittedAt = new Date().toISOString();
     updateStudentState(studentId, s => ({
       ...s,
       portfolioSubmitted: true,
-      portfolioRemarks: 'Portfolio compiled and submitted for adviser review.'
+      portfolioApproved: false,
+      portfolioRemarks: 'Portfolio compiled and submitted for adviser review.',
+      portfolioSubmittedAt: submittedAt,
+      portfolioAdviserReviewedAt: undefined,
+      coordinatorPortfolioStatus: 'Pending',
+      coordinatorPortfolioRemarks: '',
+      coordinatorPortfolioReviewedAt: undefined,
+      portfolioReviewHistory: [...(s.portfolioReviewHistory || []), { role: 'Student', action: s.portfolioSubmittedAt ? 'Resubmitted portfolio' : 'Submitted portfolio', remarks: 'Portfolio compiled and submitted for adviser review.', timestamp: submittedAt }]
     }));
   };
 
   // Adviser Actions
   const reviewPreOJTReq = (studentId: string, reqName: string, status: RequirementItem['status'], remarks: string) => {
+    const reviewedAt = new Date().toLocaleString();
     updateStudentState(studentId, s => ({
       ...s,
       preOJTRequirements: s.preOJTRequirements.map(r =>
-        r.name === reqName ? { ...r, status, remarks, updatedAt: new Date().toLocaleDateString() } : r
+        r.name === reqName ? { ...r, status, remarks, reviewedAt, updatedAt: reviewedAt, revisionCount: status === 'Needs Revision' ? (r.revisionCount || 0) + 1 : r.revisionCount, coordinatorStatus: 'Pending', coordinatorRemarks: '', coordinatorReviewedAt: undefined, reviewHistory: [...(r.reviewHistory || []), { role: 'Adviser', action: status, remarks, timestamp: reviewedAt }] } : r
       )
     }));
   };
 
   const reviewDuringOJTReq = (studentId: string, reqName: string, status: RequirementItem['status'], remarks: string) => {
+    const reviewedAt = new Date().toLocaleString();
     updateStudentState(studentId, s => ({
       ...s,
       duringOJTRequirements: s.duringOJTRequirements.map(r =>
-        r.name === reqName ? { ...r, status, remarks, updatedAt: new Date().toLocaleDateString() } : r
+        r.name === reqName ? { ...r, status, remarks, reviewedAt, updatedAt: reviewedAt, revisionCount: status === 'Needs Revision' ? (r.revisionCount || 0) + 1 : r.revisionCount, coordinatorStatus: 'Pending', coordinatorRemarks: '', coordinatorReviewedAt: undefined, reviewHistory: [...(r.reviewHistory || []), { role: 'Adviser', action: status, remarks, timestamp: reviewedAt }] } : r
       )
     }));
   };
 
   const reviewPostOJTReq = (studentId: string, reqName: string, status: RequirementItem['status'], remarks: string) => {
+    const reviewedAt = new Date().toLocaleString();
     updateStudentState(studentId, s => ({
       ...s,
       postOJTRequirements: s.postOJTRequirements.map(r =>
-        r.name === reqName ? { ...r, status, remarks, updatedAt: new Date().toLocaleDateString() } : r
+        r.name === reqName ? { ...r, status, remarks, reviewedAt, updatedAt: reviewedAt, revisionCount: status === 'Needs Revision' ? (r.revisionCount || 0) + 1 : r.revisionCount, coordinatorStatus: 'Pending', coordinatorRemarks: '', coordinatorReviewedAt: undefined, reviewHistory: [...(r.reviewHistory || []), { role: 'Adviser', action: status, remarks, timestamp: reviewedAt }] } : r
       )
     }));
   };
 
   const reviewMOA = (studentId: string, status: MOAState['status'], remarks: string) => {
+    const currentMoa = state.students.find(student => student.studentId === studentId)?.moaState;
+    if (!currentMoa || !canSetMoaStatus(user?.role, status, currentMoa.status) || (status === 'SAS COPY SUBMITTED' && currentMoa.pendingUpload)) {
+      return { success: false, error: status === 'SAS COPY SUBMITTED'
+        ? 'Confirm SIGNED AND NOTARIZED for the reviewed copy before recording submission to SAS.'
+        : 'Only the coordinator can assign a valid MOA status to an existing record.' };
+    }
     updateStudentState(studentId, s => {
       const today = new Date().toISOString().split('T')[0];
+      const reviewedAt = new Date().toISOString();
       return {
         ...s,
         moaState: {
           ...s.moaState,
+          fileName: s.moaState.pendingUpload?.fileName ?? s.moaState.fileName,
+          file: s.moaState.pendingUpload?.file ?? s.moaState.file,
+          pendingUpload: undefined,
           status,
           remarks,
+          reviewedAt,
           timeline: [
             ...s.moaState.timeline,
             { date: today, status, remarks }
@@ -1073,6 +1403,7 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
         }
       };
     });
+    return { success: true };
   };
 
   const reviewDailyTask = (studentId: string, taskId: string, status: DailyTask['status'], remarks: string) => {
@@ -1094,11 +1425,45 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
   };
 
   const reviewPortfolio = (studentId: string, status: 'Approved' | 'Needs Revision', remarks: string) => {
+    const reviewedAt = new Date().toISOString();
     updateStudentState(studentId, s => ({
       ...s,
       portfolioApproved: status === 'Approved',
       portfolioRemarks: remarks,
-      portfolioSubmitted: status === 'Needs Revision' ? false : s.portfolioSubmitted
+      portfolioSubmitted: status === 'Needs Revision' ? false : s.portfolioSubmitted,
+      portfolioAdviserReviewedAt: reviewedAt,
+      coordinatorPortfolioStatus: 'Pending',
+      coordinatorPortfolioRemarks: '',
+      coordinatorPortfolioReviewedAt: undefined,
+      portfolioReviewHistory: [...(s.portfolioReviewHistory || []), { role: 'Adviser', action: status === 'Approved' ? 'Endorsed portfolio' : 'Requested portfolio revision', remarks, timestamp: reviewedAt }]
+    }));
+  };
+
+  const reviewCoordinatorRequirement = (studentId: string, stage: RequirementStage, reqName: string, status: CoordinatorReviewStatus, remarks: string) => {
+    const reviewedAt = new Date().toISOString();
+    const key: 'preOJTRequirements' | 'duringOJTRequirements' | 'postOJTRequirements' = stage === 'pre' ? 'preOJTRequirements' : stage === 'during' ? 'duringOJTRequirements' : 'postOJTRequirements';
+    updateStudentState(studentId, s => ({
+      ...s,
+      [key]: s[key].map(requirement => requirement.name === reqName ? {
+        ...requirement,
+        coordinatorStatus: status,
+        coordinatorRemarks: remarks,
+        coordinatorReviewedAt: reviewedAt,
+        reviewHistory: [...(requirement.reviewHistory || []), { role: 'Coordinator', action: status, remarks, timestamp: reviewedAt }],
+      } : requirement),
+    }));
+  };
+
+  const reviewCoordinatorPortfolio = (studentId: string, status: 'Approved' | 'Needs Revision', remarks: string) => {
+    const reviewedAt = new Date().toISOString();
+    updateStudentState(studentId, s => ({
+      ...s,
+      coordinatorPortfolioStatus: status,
+      coordinatorPortfolioRemarks: remarks,
+      coordinatorPortfolioReviewedAt: reviewedAt,
+      portfolioSubmitted: status === 'Needs Revision' ? false : s.portfolioSubmitted,
+      portfolioApproved: status === 'Needs Revision' ? false : s.portfolioApproved,
+      portfolioReviewHistory: [...(s.portfolioReviewHistory || []), { role: 'Coordinator', action: status === 'Approved' ? 'Final portfolio approval' : 'Requested portfolio revision', remarks, timestamp: reviewedAt }],
     }));
   };
 
@@ -1135,6 +1500,7 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
       portfolioApproved: false,
       portfolioRemarks: '',
       portfolioSubmitted: false,
+      portfolioSubmittedAt: undefined,
     };
     setState(prev => ({
       ...prev,
@@ -1166,6 +1532,26 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
     setState(prev => ({
       ...prev,
       companies: prev.companies.map(c => c.id === compId ? { ...c, ...updates } : c)
+    }));
+  };
+
+  const addHTEPartner = (partner: Omit<HTEPartner, 'id'>) => {
+    setState(prev => ({
+      ...prev,
+      htePartners: [
+        ...prev.htePartners,
+        {
+          ...partner,
+          id: `hte_${Date.now()}`
+        }
+      ]
+    }));
+  };
+
+  const updateHTEPartner = (partnerId: string, updates: Partial<HTEPartner>) => {
+    setState(prev => ({
+      ...prev,
+      htePartners: prev.htePartners.map(partner => partner.id === partnerId ? { ...partner, ...updates } : partner)
     }));
   };
 
@@ -1253,7 +1639,7 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
 
       if (stage === 'Stage 2: During OJT' || stage === 'Stage 3: Post-OJT' || stage === 'Stage 4: Portfolio Completion') {
         preOjt = preOjt.map(r => ({ ...r, status: 'Approved' }));
-        moa.status = 'SAS COPY';
+        moa.status = 'SIGNED AND NOTARIZED';
       }
 
       if (stage === 'Stage 3: Post-OJT' || stage === 'Stage 4: Portfolio Completion') {
@@ -1286,6 +1672,7 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
       value={{
         students: state.students,
         companies: state.companies,
+        htePartners: state.htePartners,
         announcements: state.announcements,
         messages: state.messages,
         templates: state.templates,
@@ -1296,6 +1683,7 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
         
         timeIn,
         timeOut,
+        requestAttendanceCorrection,
         submitDailyTask,
         deleteDailyTask,
         updateDailyTask,
@@ -1306,6 +1694,8 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
         uploadPostOJTReq,
         uploadMOA,
         submitPortfolio,
+        generateDTR,
+        submitGeneratedDTR,
         submitDTR,
         updateDTRStatus,
         
@@ -1316,12 +1706,17 @@ export function OJTProvider({ children }: { children: React.ReactNode }) {
         reviewDailyTask,
         reviewWeeklyJournal,
         reviewPortfolio,
+        reviewAttendanceCorrection,
         submitStudentEvaluation,
+        reviewCoordinatorRequirement,
+        reviewCoordinatorPortfolio,
         
         addStudentProfile,
         updateStudentProfile,
         addCompany,
         updateCompany,
+        addHTEPartner,
+        updateHTEPartner,
         addTemplate,
         updateTemplate,
         addAnnouncement,
@@ -1345,3 +1740,6 @@ export function useOJT() {
   }
   return context;
 }
+
+/** Bridge saved backend data into the unchanged original module components. */
+export const ProtectedOJTProvider = OJTContext.Provider;

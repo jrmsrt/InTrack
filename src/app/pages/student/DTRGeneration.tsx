@@ -341,7 +341,7 @@ export function DTRGeneration() {
 
                   {/* DTR Grid list */}
                   <div className="border border-slate-350 rounded overflow-hidden bg-white">
-                    <table className="w-full text-left text-[10.5px] border-collapse font-mono">
+                    <table className="intrack-table w-full text-left text-[10.5px] border-collapse font-mono">
                       <thead>
                         <tr className="bg-slate-100 border-b border-slate-350 font-sans font-bold text-slate-600 text-center">
                           <th className="p-2 border-r border-slate-300 w-16">Day</th>

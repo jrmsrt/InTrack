@@ -1,13 +1,20 @@
+import { StudentPortal } from './components/shared/StudentPortal';
+import { useProtectedIdentity } from './context/useProtectedIdentity';
+import { AuthenticatorVerification } from './pages/auth/AuthenticatorVerification';
 import React from 'react';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { Login } from './pages/auth/Login';
-import { LandingPage } from './pages/LandingPage';
+import { AccountAccess } from './pages/auth/AccountAccess';
 import { ForgotPassword } from './pages/auth/ForgotPassword';
-import { EmailVerifiedSuccess, VerificationExpired, VerifyEmail } from './pages/auth/EmailVerification';
-import { OtpVerification } from './pages/auth/OtpVerification';
+import { ResetPassword } from './pages/auth/ResetPassword';
 import { PasswordDecision } from './pages/auth/PasswordDecision';
 import { ChangePassword } from './pages/auth/ChangePassword';
-import { Layout } from './components/Layout';
+import { LandingPage } from './pages/LandingPage';
+import { OtpVerification } from './pages/auth/OtpVerification';
+import { Layout } from './components/shared/Layout';
+import { CoordinatorPortal } from './components/shared/CoordinatorPortal';
+import {CoordinatorMessages} from './pages/coordinator/CoordinatorMessages';
+import {CoordinatorAccount} from './pages/coordinator/CoordinatorAccount';
 
 // Student Portal Pages
 import { StudentDashboard } from './pages/student/StudentDashboard';
@@ -41,55 +48,58 @@ import { MOAManagement } from './pages/coordinator/MOAManagement';
 import { TemplateManagement } from './pages/coordinator/TemplateManagement';
 import { OJTDatabase } from './pages/coordinator/OJTDatabase';
 import { PortfolioManagement } from './pages/coordinator/PortfolioManagement';
+import { CoordinatorRequirementsReview } from './pages/coordinator/RequirementsReview';
 import { Announcements } from './pages/coordinator/Announcements';
 import { Settings as CoordinatorSettings } from './pages/coordinator/Settings';
 
 // Shared Pages
 import { Messages } from './pages/shared/Messages';
 import { Settings } from './pages/shared/Settings';
+import { PrivacyNotice } from './pages/shared/PrivacyNotice';
+
+function getStoredUser() {
+  const savedUser = localStorage.getItem('user');
+  if (!savedUser) return null;
+
+  try {
+    const user = JSON.parse(savedUser);
+    return user && typeof user === 'object' && ['student', 'adviser', 'coordinator'].includes(user.role)
+      ? user
+      : null;
+  } catch {
+    localStorage.removeItem('user');
+    localStorage.removeItem('userRole');
+    return null;
+  }
+}
 
 // Protected route wrapper
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const savedUser = localStorage.getItem('user');
+type AppRole = 'student' | 'adviser' | 'coordinator';
+
+function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: AppRole[] }) {
+  if(allowedRoles?.length===1&&allowedRoles[0]==='student')return <StudentPortal>{children}</StudentPortal>;
+  const savedUser = getStoredUser();
   
   if (!savedUser) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (allowedRoles && !allowedRoles.includes(savedUser.role)) {
+    return <Navigate to="/dashboard" replace />;
   }
   
   return <Layout>{children}</Layout>;
 }
 
-function ProtectedPrintRoute({ children }: { children: React.ReactNode }) {
-  const savedUser = localStorage.getItem('user');
-
-  if (!savedUser) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <>{children}</>;
-}
-
 // Role-based Dashboard router
 function DashboardRouter() {
-  const savedUser = localStorage.getItem('user');
-
-  if (!savedUser) {
-    return <Navigate to="/login" replace />;
-  }
-
-  const user = JSON.parse(savedUser);
-
-  let Dashboard;
-
-  if (user.role === 'adviser') {
-    Dashboard = <AdviserDashboard />;
-  } else if (user.role === 'coordinator') {
-    Dashboard = <CoordinatorDashboard />;
-  } else {
-    Dashboard = <StudentDashboard />;
-  }
-
-  return <Layout>{Dashboard}</Layout>;
+  const {result}=useProtectedIdentity(true);
+  if(result.state==='loading')return <main role="status">Checking account access…</main>;
+  if(result.state==='signed_out')return <Navigate to="/login" replace/>;
+  if(result.state!=='loaded'||result.identity.state!=='ready')return <Navigate to="/account-access" replace/>;
+  if(result.identity.usableRoles.includes('coordinator'))return <Navigate to="/coordinator/dashboard" replace/>;
+  if(result.identity.usableRoles.includes('student'))return <StudentPortal><StudentDashboard/></StudentPortal>;
+  return <Navigate to="/account-access" replace/>;
 }
 
 export const router = createBrowserRouter([
@@ -106,8 +116,24 @@ export const router = createBrowserRouter([
     Component: ForgotPassword,
   },
   {
+    path: '/reset-password/*',
+    Component: ResetPassword,
+  },
+  {
+    path: '/privacy-notice',
+    Component: PrivacyNotice,
+  },
+  {
     path: '/verify-otp',
     Component: OtpVerification,
+  },
+  {
+    path: '/verify-authenticator',
+    Component: AuthenticatorVerification,
+  },
+  {
+    path: '/account-access',
+    Component: AccountAccess,
   },
   {
     path: '/password-decision',
@@ -119,15 +145,15 @@ export const router = createBrowserRouter([
   },
   {
     path: '/verify-email',
-    Component: VerifyEmail,
+    element: <Navigate to="/login" replace />,
   },
   {
     path: '/email-verified',
-    Component: EmailVerifiedSuccess,
+    element: <Navigate to="/login" replace />,
   },
   {
     path: '/verification-expired',
-    Component: VerificationExpired,
+    element: <Navigate to="/login" replace />,
   },
   {
     path: '/dashboard',
@@ -137,15 +163,15 @@ export const router = createBrowserRouter([
   // Student Portal Routes
   {
     path: '/pre-ojt',
-    element: <ProtectedRoute><PreOJT /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><PreOJT /></ProtectedRoute>
   },
   {
     path: '/moa',
-    element: <ProtectedRoute><MOATracking /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><MOATracking /></ProtectedRoute>
   },
   {
     path: '/attendance',
-    element: <ProtectedRoute><Attendance /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><Attendance /></ProtectedRoute>
   },
   {
     path: '/dtr-generation',
@@ -153,57 +179,57 @@ export const router = createBrowserRouter([
   },
   {
     path: '/print-dtr/:dtrId',
-    element: <ProtectedPrintRoute><PrintDTR /></ProtectedPrintRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><PrintDTR /></ProtectedRoute>
   },
   {
     path: '/tasks',
-    element: <ProtectedRoute><Tasks /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><Tasks /></ProtectedRoute>
   },
   {
     path: '/weekly-journal',
-    element: <ProtectedRoute><WeeklyJournal /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><WeeklyJournal /></ProtectedRoute>
   },
   {
     path: '/print-weekly-journal/:journalId',
-    element: <ProtectedPrintRoute><PrintWeeklyJournal /></ProtectedPrintRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><PrintWeeklyJournal /></ProtectedRoute>
   },
   {
     path: '/during-ojt',
-    element: <ProtectedRoute><DuringOJT /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><DuringOJT /></ProtectedRoute>
   },
   {
     path: '/post-ojt',
-    element: <ProtectedRoute><PostOJT /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><PostOJT /></ProtectedRoute>
   },
   {
     path: '/portfolio',
-    element: <ProtectedRoute><PortfolioBuilder /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><PortfolioBuilder /></ProtectedRoute>
   },
   {
     path: '/forms-templates',
-    element: <ProtectedRoute><FormsTemplates /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['student']}><FormsTemplates /></ProtectedRoute>
   },
 
   // Adviser Portal Routes
   {
     path: '/adviser/students',
-    element: <ProtectedRoute><StudentMonitoring /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['adviser']}><StudentMonitoring /></ProtectedRoute>
   },
   {
     path: '/adviser/attendance',
-    element: <ProtectedRoute><AttendanceMonitoring /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['adviser']}><AttendanceMonitoring /></ProtectedRoute>
   },
   {
     path: '/adviser/forms-templates',
-    element: <ProtectedRoute><AdviserFormsTemplates /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['adviser']}><AdviserFormsTemplates /></ProtectedRoute>
   },
   {
     path: '/adviser/journals',
-    element: <ProtectedRoute><JournalReview /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['adviser']}><JournalReview /></ProtectedRoute>
   },
   {
     path: '/adviser/review-requirements',
-    element: <ProtectedRoute><RequirementReviews /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['adviser']}><RequirementReviews /></ProtectedRoute>
   },
   {
     path: '/adviser/pre-ojt',
@@ -219,45 +245,52 @@ export const router = createBrowserRouter([
   },
   {
     path: '/adviser/portfolio',
-    element: <ProtectedRoute><PortfolioReview /></ProtectedRoute>
+    element: <ProtectedRoute allowedRoles={['adviser']}><PortfolioReview /></ProtectedRoute>
   },
 
   // Coordinator Portal Routes
+  {path:'/coordinator/dashboard',element:<CoordinatorPortal><CoordinatorDashboard/></CoordinatorPortal>},
+  {path:'/coordinator/messages',element:<CoordinatorPortal><CoordinatorMessages/></CoordinatorPortal>},
+  {path:'/coordinator/account',element:<CoordinatorPortal><CoordinatorAccount/></CoordinatorPortal>},
   {
     path: '/coordinator/students',
-    element: <ProtectedRoute><StudentManagement /></ProtectedRoute>
+    element: <CoordinatorPortal><StudentManagement /></CoordinatorPortal>
   },
   {
     path: '/coordinator/advisers',
-    element: <ProtectedRoute><AdviserManagement /></ProtectedRoute>
+    element: <CoordinatorPortal><AdviserManagement /></CoordinatorPortal>
   },
   {
     path: '/coordinator/companies',
-    element: <ProtectedRoute><CompanyManagement /></ProtectedRoute>
+    element: <CoordinatorPortal><CompanyManagement /></CoordinatorPortal>
   },
   {
     path: '/coordinator/moas',
-    element: <ProtectedRoute><MOAManagement /></ProtectedRoute>
+    element: <CoordinatorPortal><MOAManagement /></CoordinatorPortal>
   },
   {
     path: '/coordinator/templates',
-    element: <ProtectedRoute><TemplateManagement /></ProtectedRoute>
+    element: <CoordinatorPortal><TemplateManagement /></CoordinatorPortal>
   },
   {
     path: '/coordinator/database',
-    element: <ProtectedRoute><OJTDatabase /></ProtectedRoute>
+    element: <CoordinatorPortal><OJTDatabase /></CoordinatorPortal>
   },
   {
     path: '/coordinator/portfolios',
-    element: <ProtectedRoute><PortfolioManagement /></ProtectedRoute>
+    element: <CoordinatorPortal><PortfolioManagement /></CoordinatorPortal>
+  },
+  {
+    path: '/coordinator/requirements',
+    element: <CoordinatorPortal><CoordinatorRequirementsReview /></CoordinatorPortal>
   },
   {
     path: '/coordinator/announcements',
-    element: <ProtectedRoute><Announcements /></ProtectedRoute>
+    element: <CoordinatorPortal><Announcements /></CoordinatorPortal>
   },
   {
     path: '/coordinator/settings',
-    element: <ProtectedRoute><CoordinatorSettings /></ProtectedRoute>
+    element: <CoordinatorPortal><CoordinatorSettings /></CoordinatorPortal>
   },
 
   // Shared Routes

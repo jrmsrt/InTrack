@@ -1,250 +1,99 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, Clock } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { BrandedHeader } from '../../components/BrandedHeader';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import { useEffect, useRef, useState } from 'react';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Clock } from 'lucide-react';
+import { InputOTP, InputOTPGroup, InputOTPSlot } from '../../components/ui/input-otp';
+import { BrandedHeader } from '../../components/shared/BrandedHeader';
 import { Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/input';
-import { Label } from '../../components/ui/label';
-
-function formatSeconds(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
-}
+import { emailOtpGateway, OTP_REQUEST_INTERVAL_MS } from '../../lib/emailOtp';
+import { createPasswordCheckClient, getSupabaseClient } from '../../lib/supabaseClient';
+import { readMyProtectedIdentity } from '../../lib/protectedIdentity';
+import { destinationAfterEmailOtp } from '../../lib/firstLogin';
+import { clearLoginChallenge, readLoginChallenge, saveLoginChallenge } from '../../lib/loginChallenge';
 
 export function OtpVerification() {
   const navigate = useNavigate();
-  const { getPendingOtp, verifyOtp, resendOtp } = useAuth();
-  
-  const [otpValues, setOtpValues] = useState(['', '', '', '', '', '']);
-  const otpCode = useMemo(() => otpValues.join(''), [otpValues]);
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  
+  const [challenge, setChallenge] = useState(readLoginChallenge);
+  const [code, setCode] = useState('');
+  const [now, setNow] = useState(Date.now());
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-
-  const handleChange = (value: string, index: number) => {
-    const cleaned = value.replace(/\D/g, '');
-    if (!cleaned) {
-      setOtpValues(prev => {
-        const newValues = [...prev];
-        newValues[index] = '';
-        return newValues;
-      });
-      return;
-    }
-
-    const digits = cleaned.split('');
-    
-    setOtpValues(prev => {
-      const newValues = [...prev];
-      for (let j = 0; j < digits.length && index + j < 6; j++) {
-        newValues[index + j] = digits[j];
-      }
-      return newValues;
-    });
-
-    const nextIndex = Math.min(index + digits.length, 5);
-    setTimeout(() => {
-      inputRefs.current[nextIndex]?.focus();
-      inputRefs.current[nextIndex]?.select();
-    }, 0);
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, index: number) => {
-    if (event.key === 'Backspace') {
-      event.preventDefault();
-      
-      setOtpValues(prev => {
-        const newValues = [...prev];
-        if (prev[index] === '') {
-          const prevIndex = Math.max(0, index - 1);
-          newValues[prevIndex] = '';
-          setTimeout(() => {
-            inputRefs.current[prevIndex]?.focus();
-            inputRefs.current[prevIndex]?.select();
-          }, 0);
-        } else {
-          newValues[index] = '';
-        }
-        return newValues;
-      });
-    }
-  };
-
-  const handlePaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
-    event.preventDefault();
-    const pastedData = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-    if (pastedData.length > 0) {
-      const newValues = [...otpValues];
-      const digits = pastedData.split('');
-      for (let i = 0; i < 6; i++) {
-        newValues[i] = digits[i] || '';
-      }
-      setOtpValues(newValues);
-      
-      const focusIndex = Math.min(pastedData.length, 5);
-      setTimeout(() => {
-        inputRefs.current[focusIndex]?.focus();
-        inputRefs.current[focusIndex]?.select();
-      }, 0);
-    }
-  };
-  const [pendingOtp, setPendingOtp] = useState(() => getPendingOtp());
-  const [secondsRemaining, setSecondsRemaining] = useState(300);
-  const [resendSeconds, setResendSeconds] = useState(30);
-
+  const [message, setMessage] = useState('');
+  const pending = useRef(false);
+  const alive = useRef(true);
   useEffect(() => {
-    if (!pendingOtp) {
-      navigate('/login');
-      return;
-    }
-
-    const updateTimer = () => {
-      const remaining = Math.max(0, Math.ceil((new Date(pendingOtp.expiresAt).getTime() - Date.now()) / 1000));
-      setSecondsRemaining(remaining);
-    };
-
-    updateTimer();
-    const interval = window.setInterval(updateTimer, 1000);
-    return () => window.clearInterval(interval);
-  }, [navigate, pendingOtp]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setResendSeconds((current) => Math.max(0, current - 1));
-    }, 1000);
-
-    return () => window.clearInterval(interval);
+    alive.current = true;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => { alive.current = false; window.clearInterval(timer); };
   }, []);
-
-  const isExpired = secondsRemaining <= 0;
-  const maskedEmail = useMemo(() => pendingOtp?.email || 'your PUP Webmail', [pendingOtp]);
-
-  const handleSubmit = (event?: React.FormEvent) => {
-    if (event) event.preventDefault();
-    const result = verifyOtp(otpCode);
-
-    if (!result.success) {
-      setError(result.error || 'Unable to verify OTP. Please try again.');
-      return;
-    }
-
-    setError('');
-    navigate(pendingOtp?.purpose === 'passwordReset' ? '/change-password' : '/password-decision');
-  };
-
-  useEffect(() => {
-    if (otpCode.length === 6) {
-      handleSubmit();
-    }
-  }, [otpCode]);
-
-  const handleResend = () => {
-    const result = resendOtp();
-
-    if (!result.success) {
-      setError(result.error || 'Unable to resend OTP. Please log in again.');
-      return;
-    }
-
-    setPendingOtp(getPendingOtp());
-    setOtpValues(['', '', '', '', '', '']);
-    setError('');
-    setResendSeconds(30);
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      <BrandedHeader />
-      <div className="flex-1 flex items-center justify-center p-6">
-        <Card className="w-full max-w-[420px] rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <CardHeader className="text-center px-6 pt-7 pb-3 gap-1">
-            <CardTitle className="text-2xl font-bold leading-tight text-slate-900">OTP Verification</CardTitle>
-            <CardDescription className="text-xs text-slate-500">
-              We sent a secure One-Time Password to your PUP Webmail.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="px-6 pb-6">
-            {localStorage.getItem('lastOtpPreview') && (
-              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-[10px] text-blue-700 text-center font-sans">
-                <span>[Dev Mode] The OTP code generated is: <strong className="font-bold text-sm text-blue-900">{localStorage.getItem('lastOtpPreview')}</strong></span>
-              </div>
-            )}
-
-            {error && (
-              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 flex gap-2 text-xs text-red-700">
-                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <div className={`mb-5 flex h-10 items-center justify-between rounded-lg border px-4 text-xs ${isExpired ? 'border-red-200 bg-red-50 text-red-700' : 'border-[#ffd36b] bg-[#fff2cc] text-[#6f5415]'}`}>
-              <span className="flex items-center gap-1.5 font-medium">
-                <Clock className="h-3.5 w-3.5" />
-                Code expires in:
-              </span>
-              <span className="text-sm font-bold text-[#990000]">{isExpired ? 'EXPIRED' : formatSeconds(secondsRemaining)}</span>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="space-y-3">
-                <Label className="text-xs font-bold uppercase tracking-wider text-slate-500 block text-center">Enter 6-Digit OTP</Label>
-                <div className="flex justify-between gap-1.5 max-w-[280px] mx-auto">
-                  {otpValues.map((value, idx) => (
-                    <input
-                      key={idx}
-                      ref={(el) => {
-                        inputRefs.current[idx] = el;
-                      }}
-                      id={`otp-${idx}`}
-                      type="text"
-                      value={value}
-                      onChange={(event) => handleChange(event.target.value, idx)}
-                      onKeyDown={(event) => handleKeyDown(event, idx)}
-                      onPaste={handlePaste}
-                      inputMode="numeric"
-                      maxLength={6}
-                      className="h-11 w-9 border border-slate-200 bg-slate-50 text-center text-lg font-bold rounded-lg transition-all duration-200 focus:border-[#800000] focus:ring-[3px] focus:ring-[#800000]/20 focus:shadow-[0_0_10px_rgba(128,0,0,0.15)] outline-none"
-                      disabled={isExpired}
-                      required
-                    />
-                  ))}
-                </div>
-                <p className="text-center text-[10px] text-slate-400 pt-1 leading-normal">Please enter the 6-digit verification code sent to {maskedEmail}.</p>
-              </div>
-
-              <Button
-                type="submit"
-                disabled={otpCode.length !== 6 || isExpired}
-                className="h-11 w-full rounded-lg bg-[#800000] hover:bg-[#6b0000] text-sm font-bold text-white shadow-sm cursor-pointer disabled:cursor-not-allowed disabled:bg-[#b85b5b]"
-              >
-                Verify OTP
-              </Button>
-            </form>
-
-            <div className="mt-5 text-center text-xs text-slate-500">
-              Didn't receive the code?{' '}
-              <button
-                type="button"
-                onClick={handleResend}
-                disabled={resendSeconds > 0}
-                className="font-semibold text-[#800000] hover:underline disabled:cursor-not-allowed disabled:text-slate-400"
-              >
-                Resend OTP {resendSeconds > 0 ? `(Wait ${resendSeconds}s)` : ''}
-              </button>
-            </div>
-
-            <div className="mt-6 border-t border-slate-200 pt-4 text-center">
-              <Link to="/login" className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-[#800000]">
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Cancel
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
+  if (!challenge) return <Navigate to="/login" replace />;
+  const resendWait = Math.max(0, Math.ceil((challenge.requestedAt + OTP_REQUEST_INTERVAL_MS - now) / 1000));
+  // Match the configured Supabase email OTP lifetime; verification stays server-owned.
+  const expiresIn = Math.max(0, Math.ceil((challenge.requestedAt + 600_000 - now) / 1000));
+  const expiryLabel = `${Math.floor(expiresIn / 60).toString().padStart(2, '0')}:${(expiresIn % 60).toString().padStart(2, '0')}`;
+  async function verify(event: React.FormEvent) {
+    event.preventDefault();
+    if (!challenge || pending.current) return;
+    pending.current = true; setBusy(true); setError(''); setMessage('');
+    try {
+      // Verify email in an isolated session; preserve the password AMR in the app session.
+      const temporary=createPasswordCheckClient();
+      try{
+        await emailOtpGateway(temporary.auth).verify(challenge.email,code);
+        const verified=await temporary.auth.getSession();
+        const token=verified.data.session?.access_token;
+        if(verified.error||!token)throw new Error('Email verification session unavailable.');
+        const receipt=await getSupabaseClient().functions.invoke('confirm-login-email',{body:{otpAccessToken:token}});
+        if(receipt.error||receipt.data?.verified!==true)throw new Error('Email verification could not be linked to this password sign-in.');
+      }finally{await temporary.auth.signOut({scope:'local'});}
+      // Whitelisted first-login accounts complete their password decision before activation.
+      const identity=await readMyProtectedIdentity();
+      if (alive.current) { clearLoginChallenge(); navigate(destinationAfterEmailOtp(identity), { replace: true }); }
+    } catch (cause) {
+      if (alive.current) setError(cause instanceof Error && cause.message.startsWith('The code') ? cause.message : 'Unable to complete verification. Check the code or retry your account access.');
+    } finally { pending.current = false; if (alive.current) { setBusy(false); setCode(''); } }
+  }
+  async function resend() {
+    if (!challenge || pending.current || resendWait > 0) return;
+    pending.current = true; setBusy(true); setError(''); setMessage('');
+    try {
+      await emailOtpGateway(getSupabaseClient().auth).request(challenge.email);
+      if (!alive.current) return;
+      const next = { ...challenge, requestedAt: Date.now() };
+      saveLoginChallenge(next); setChallenge(next); setNow(Date.now()); setCode('');
+      setMessage('A new code was requested. Check your Inbox and Junk folder.');
+    } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : 'Unable to resend. Retry later.'); }
+    finally { pending.current = false; if (alive.current) setBusy(false); }
+  }
+  return <div className="min-h-screen bg-slate-50 flex flex-col font-sans"><BrandedHeader />
+    <main className="flex-1 flex items-center justify-center p-4 py-12">
+      <section aria-labelledby="otp-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white px-6 py-8 shadow-sm">
+        <h1 id="otp-title" className="text-center text-2xl font-bold text-slate-900">OTP Verification</h1>
+        <p className="mt-1 text-center text-xs text-slate-500">We sent a secure One-Time Password to your PUP Webmail.</p>
+        <div className="mt-8 mb-6 flex items-center justify-between rounded-lg border border-amber-300 bg-amber-100/80 px-4 py-3 text-xs text-amber-900">
+          <span className="flex items-center gap-2"><Clock className="h-3.5 w-3.5" />{expiresIn > 0 ? 'Code expires in:' : 'Code expired. Request a new code.'}</span>
+          <span role="timer" aria-label="Time until code expires" className="font-bold text-[#800000] tabular-nums">{expiryLabel}</span>
+        </div>
+        {error && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">{error}</p>}
+        {message && <p role="status" className="mb-4 text-xs text-slate-500">{message}</p>}
+        <form onSubmit={verify}>
+          <label htmlFor="email-code" className="mb-3 block text-center text-xs font-bold uppercase tracking-wider text-slate-500">Enter 6-digit OTP</label>
+          <InputOTP id="email-code" aria-describedby="otp-instructions" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]*" required maxLength={6}
+            autoFocus disabled={busy} value={code} onChange={value=>setCode(value.replace(/\D/g,'').slice(0,6))}
+            containerClassName="justify-center">
+            <InputOTPGroup className="gap-2 sm:gap-3">
+              {Array.from({length:6},(_,index)=><InputOTPSlot key={index} index={index} className="h-12 w-9 sm:w-10 rounded-lg first:rounded-lg last:rounded-lg border border-slate-200 bg-slate-50 text-lg font-bold text-slate-900 data-[active=true]:border-[#800000] data-[active=true]:ring-[#800000]/20"/>)}
+            </InputOTPGroup>
+          </InputOTP>
+          <p id="otp-instructions" className="mt-5 text-center text-[10px] leading-relaxed text-slate-400">Please enter the 6-digit verification code sent to<br /><span className="break-words">{challenge.email}.</span></p>
+          <Button type="submit" disabled={busy || code.length !== 6 || expiresIn === 0} className="mt-5 h-12 w-full rounded-lg bg-[#800000] hover:bg-[#6b0000] text-sm font-bold text-white shadow-sm">{busy ? 'Please wait…' : 'Verify OTP'}</Button>
+        </form>
+        <div className="mt-6 text-center text-xs text-slate-500">Didn't receive the code?{' '}
+          <button type="button" onClick={() => void resend()} disabled={busy || resendWait > 0} className="font-semibold text-sm text-[#800000] disabled:text-slate-400">{resendWait > 0 ? `Resend OTP (Wait ${resendWait}s)` : 'Resend OTP'}</button>
+        </div>
+        <div className="mt-7 border-t border-slate-200 pt-5 text-center">
+          <Link to="/login" onClick={clearLoginChallenge} aria-disabled={busy} className={`inline-flex items-center gap-2 text-xs font-semibold text-slate-500 ${busy ? 'pointer-events-none' : ''}`}><ArrowLeft className="h-3.5 w-3.5" />Cancel</Link>
+        </div>
+      </section>
+    </main>
+  </div>;
 }

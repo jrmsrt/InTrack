@@ -1,3 +1,4 @@
+import { PortfolioFiles } from '../../components/forms/FileViewer';
 import React, { useState } from 'react';
 import { useOJT } from '../../context/OJTContext';
 import { useAuth } from '../../context/AuthContext';
@@ -17,6 +18,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { portfolioContents } from '../../domain/portfolioContents';
 
 export function PortfolioBuilder() {
   const { user } = useAuth();
@@ -85,16 +87,14 @@ export function PortfolioBuilder() {
         spread: 80,
         origin: { y: 0.6 }
       });
-      toast.success("OJT Portfolio Compiled Successfully!", {
-        description: "Official documents structured. Scroll to preview or download."
+      toast.success("Portfolio submitted for review", {
+        description: "Your submission status has been updated. Open the available attachments below."
       });
     }, 2500);
   };
 
   const handleDownload = () => {
-    toast.success("Downloading compiled PDF Portfolio...", {
-      description: `Saved: ${student.name.replace(/ /g, '_')}_OJT_Portfolio.pdf`
-    });
+    toast.info("No compiled PDF file is available. Open the uploaded portfolio attachments below.");
   };
 
   return (
@@ -107,7 +107,8 @@ export function PortfolioBuilder() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Status Checklist and Verification */}
+        
+      {/* Status Checklist and Verification */}
         <div className="lg:col-span-1 space-y-6">
           <Card className="shadow-sm border-slate-200">
             <CardHeader>
@@ -161,11 +162,11 @@ export function PortfolioBuilder() {
 
                 <Button
                   onClick={handleDownload}
-                  disabled={!downloadReady && !student.portfolioApproved}
+                  disabled
                   className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
                 >
                   <Download className="h-4 w-4" />
-                  Download Compiled PDF
+                  No compiled PDF available
                 </Button>
               </div>
             </CardContent>
@@ -191,102 +192,59 @@ export function PortfolioBuilder() {
             </Card>
           )}
 
-          {student.portfolioApproved && (
+          {student.coordinatorPortfolioStatus === 'Approved' ? (
             <div className="p-3 bg-green-50 border border-green-200 text-green-800 rounded-xl text-xs flex items-start gap-1.5 font-bold">
               <CheckCircle2 className="h-4.5 w-4.5 text-green-600 shrink-0 mt-0.5" />
               <div>
-                <p>Adviser Clearance Endorsed</p>
-                <p className="text-[10px] text-slate-500 font-normal mt-0.5">remarks: "{student.portfolioRemarks || 'Excellent compilation'}"</p>
+                <p>Final Portfolio Approved</p>
+                <p className="text-[10px] text-slate-500 font-normal mt-0.5">Coordinator remarks: "{student.coordinatorPortfolioRemarks || 'Final requirements verified.'}"</p>
               </div>
             </div>
-          )}
+          ) : student.portfolioApproved ? (
+            <div className="p-3 bg-green-50 border border-green-200 text-green-800 rounded-xl text-xs flex items-start gap-1.5 font-bold">
+              <CheckCircle2 className="h-4.5 w-4.5 text-green-600 shrink-0 mt-0.5" />
+              <div>
+                <p>Adviser Endorsed</p>
+                <p className="text-[10px] text-slate-500 font-normal mt-0.5">Awaiting final coordinator review.</p>
+              </div>
+            </div>
+          ) : student.coordinatorPortfolioStatus === 'Needs Revision' ? (
+            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs flex items-start gap-1.5 font-bold">
+              <AlertTriangle className="h-4.5 w-4.5 shrink-0 mt-0.5" />
+              <div><p>Coordinator Requested Revision</p><p className="text-[10px] font-normal mt-0.5">{student.coordinatorPortfolioRemarks || 'Please revise and resubmit the portfolio.'}</p></div>
+            </div>
+          ) : null}
         </div>
 
         {/* Portfolio Table of Contents Preview */}
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-6">
+          <Card className="shadow-sm border-slate-200">
+            <CardHeader>
+              <CardTitle className="text-base font-bold text-slate-800">Portfolio Table of Contents</CardTitle>
+              <CardDescription>Based on the coordinator’s template list. Page references show the template example; your final pagination may differ.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {[...new Set(portfolioContents.map(item => item.group))].map(group => (
+                <section key={group} aria-label={group}>
+                  <h2 className="text-sm font-semibold text-[#800000] mb-2">{group}</h2>
+                  <ol className="space-y-2 text-sm">
+                    {portfolioContents.filter(item => item.group === group).map(item => (
+                      <li key={item.id} className="flex justify-between gap-4 border-b border-slate-100 pb-2">
+                        <span>{item.title}</span><span className="text-slate-500 shrink-0">{item.templatePage}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ))}
+              <p className="text-xs text-slate-500">Existing requirements remain in your checklists, including items outside this template. This outline does not certify that sections are uploaded or approved.</p>
+            </CardContent>
+          </Card>
           <Card className="shadow-sm border-slate-200">
             <CardHeader className="border-b border-slate-100">
-              <CardTitle className="text-base font-bold text-slate-800">Portfolio Structure & Table of Contents</CardTitle>
-              <CardDescription>Visual preview of the compiled chapter outlines.</CardDescription>
+              <CardTitle className="text-base font-bold text-slate-800">Uploaded Portfolio Attachments</CardTitle>
+              <CardDescription>Open an actual uploaded attachment in a new tab.</CardDescription>
             </CardHeader>
-            <CardContent className="p-6 text-xs text-slate-700 space-y-4">
-              <div className="border border-slate-200 rounded-lg p-5 font-serif space-y-4 max-w-xl mx-auto bg-white">
-                <h3 className="text-center font-bold text-sm uppercase tracking-tight text-slate-900 border-b border-slate-900 pb-2">TABLE OF CONTENTS</h3>
-                
-                <div className="space-y-2">
-                  <div className="flex justify-between items-baseline font-bold font-sans text-[10px] text-[#800000] uppercase mt-2">
-                    <span>OJT Compilation Chapters</span>
-                    <span>Page</span>
-                  </div>
-                  
-                  <div className="flex justify-between items-baseline">
-                    <span>Title Page</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>i</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Approval Sheet (Adviser Verification)</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>ii</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Acknowledgment & Dedication</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>iii</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Introduction & OJT Objectives</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>1</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Company Host Profile</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>5</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Weekly Accomplishment Journal Logs</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>10</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Student Self-Assessment & Reflections</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>25</span>
-                  </div>
-                  
-                  <div className="flex justify-between items-baseline font-bold font-sans text-[10px] text-[#800000] uppercase mt-3">
-                    <span>Appendices</span>
-                    <span>Page</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Appendix A: Midterm and Final Evaluation Forms</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>30</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Appendix B: Consent Slips & Endorsement Letter</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>35</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Appendix C: Signed Memorandum of Agreement (MOA)</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>42</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Appendix D: Daily Time Records (DTR Log Sheets)</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>50</span>
-                  </div>
-                  <div className="flex justify-between items-baseline">
-                    <span>Appendix E: Certificate of Completion & Clearances</span>
-                    <span className="border-b border-dotted border-slate-400 flex-grow mx-2 h-1"></span>
-                    <span>58</span>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
+            <CardContent className="p-6 text-xs text-slate-700 space-y-4"><PortfolioFiles files={[...student.preOJTRequirements, ...student.duringOJTRequirements, ...student.postOJTRequirements, student.moaState].flatMap(item => item.file ? [item.file] : [])} /></CardContent>
           </Card>
         </div>
       </div>

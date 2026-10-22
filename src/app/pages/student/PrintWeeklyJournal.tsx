@@ -74,7 +74,7 @@ export function PrintWeeklyJournal() {
     );
   }
 
-  const tasks = journal.tasks || [];
+  const tasks = Array.isArray(journal.tasks) ? journal.tasks : [];
   const reflection = exportData?.reflection || journal.reflection || '';
   const problems = exportData?.problems || journal.problems || '';
   const department = exportData?.assignedDepartment || 'OJT Department';

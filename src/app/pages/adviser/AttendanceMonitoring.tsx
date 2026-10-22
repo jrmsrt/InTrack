@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useOJT, DTRRecord } from '../../context/OJTContext';
+import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 import { Input } from '../../components/ui/input';
@@ -21,7 +22,7 @@ import {
   Calendar, 
   Clock,
   FileText,
-  Printer,
+  ExternalLink,
   Sliders,
   Check,
   X
@@ -35,11 +36,13 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog';
 import { toast } from 'sonner';
+import { openDtrPdf } from '../../lib/dtrPdf';
 
 export function AttendanceMonitoring() {
-  const { students, updateDTRStatus } = useOJT();
+  const { students, companies, updateDTRStatus, reviewAttendanceCorrection } = useOJT();
+  const { user } = useAuth();
   
-  const [activeTab, setActiveTab] = useState<'logs' | 'dtrs'>('logs');
+  const [activeTab, setActiveTab] = useState<'logs' | 'corrections' | 'dtrs'>('logs');
   const [searchTerm, setSearchTerm] = useState('');
   const [sectionFilter, setSectionFilter] = useState('all');
   const [programFilter, setProgramFilter] = useState('all');
@@ -51,6 +54,8 @@ export function AttendanceMonitoring() {
   const [selectedDtr, setSelectedDtr] = useState<any | null>(null);
   const [remarks, setRemarks] = useState('');
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [selectedCorrection, setSelectedCorrection] = useState<any | null>(null);
+  const [correctionRemarks, setCorrectionRemarks] = useState('');
 
   const getComparableSection = (section: string) => {
     const normalizedSection = section.trim().toUpperCase();
@@ -136,6 +141,15 @@ export function AttendanceMonitoring() {
     return matchesSearch && matchesSection && matchesProgram && matchesDate && matchesWeek;
   });
 
+  const correctionRequests = allLogs.filter(log => log.correction).filter(log => {
+    const normalizedSearch = searchTerm.toLowerCase();
+    const matchesSearch = log.studentName.toLowerCase().includes(normalizedSearch) || log.studentNumber.includes(searchTerm) || log.date.includes(searchTerm) || log.correction.reason.toLowerCase().includes(normalizedSearch);
+    const matchesSection = sectionFilter === 'all' || getComparableSection(log.section) === sectionFilter;
+    const matchesProgram = programFilter === 'all' || log.program.includes(programFilter);
+    return matchesSearch && matchesSection && matchesProgram;
+  });
+  const pendingCorrectionCount = correctionRequests.filter(log => log.correction.status === 'Pending').length;
+
   // Filter DTRs list
   const filteredDTRs = allDTRs.filter(dtr => {
     const normalizedSearch = searchTerm.toLowerCase();
@@ -185,40 +199,34 @@ export function AttendanceMonitoring() {
     setReviewDialogOpen(true);
   };
 
-  const handleReviewAction = (status: DTRRecord['status']) => {
+  const handleReviewAction = async (status: DTRRecord['status']) => {
     if (!selectedDtr) return;
-    updateDTRStatus(selectedDtr.studentId, selectedDtr.id, status, remarks);
+    try {
+    await updateDTRStatus(selectedDtr.studentId, selectedDtr.id, status, remarks);
     toast.success(`DTR status updated to ${status}`, {
       description: `Student: ${selectedDtr.studentName}`
     });
     setReviewDialogOpen(false);
     setSelectedDtr(null);
     setRemarks('');
+    } catch(error) { toast.error(error instanceof Error?error.message:'DTR review was not saved.'); }
   };
 
-  const handlePrintDtr = (dtrId: string) => {
-    document.getElementById('dtr-print-frame')?.remove();
+  const handleOpenDtrPdf = (dtr: any) => {
+    const student = students.find(item => item.studentId === dtr.studentId);
+    if (!student) return;
+    const company = companies.find(item => item.id === student.companyId);
+    openDtrPdf({ dtr, studentName: student.name, studentNumber: student.studentNumber, companyName: student.companyName, supervisorName: company?.contactPerson });
+  };
 
-    const frame = document.createElement('iframe');
-    frame.id = 'dtr-print-frame';
-    frame.src = `/print-dtr/${dtrId}?preview=1`;
-    frame.style.position = 'fixed';
-    frame.style.right = '0';
-    frame.style.bottom = '0';
-    frame.style.width = '1px';
-    frame.style.height = '1px';
-    frame.style.border = '0';
-    frame.style.opacity = '0';
-    frame.setAttribute('aria-hidden', 'true');
-    frame.onload = () => {
-      window.setTimeout(() => {
-        frame.contentWindow?.focus();
-        frame.contentWindow?.print();
-      }, 300);
-    };
-    document.body.appendChild(frame);
-
-    window.setTimeout(() => frame.remove(), 60000);
+  const handleCorrectionDecision = async (decision: 'Approved' | 'Rejected') => {
+    if (!selectedCorrection || !user) return;
+    try {
+    await reviewAttendanceCorrection(selectedCorrection.studentId, selectedCorrection.id, decision, user.name, correctionRemarks);
+    toast.success(`Attendance correction ${decision.toLowerCase()}.`, { description: `Student: ${selectedCorrection.studentName}` });
+    setSelectedCorrection(null);
+    setCorrectionRemarks('');
+    } catch(error) { toast.error(error instanceof Error?error.message:'Correction review was not saved.'); }
   };
 
   return (
@@ -231,6 +239,13 @@ export function AttendanceMonitoring() {
         
         {/* Tab triggers */}
         <div className="flex gap-1.5 bg-slate-100 p-1.5 rounded-lg border border-slate-200 text-xs self-start">
+          <Button
+            onClick={() => setActiveTab('corrections')}
+            variant={activeTab === 'corrections' ? 'secondary' : 'ghost'}
+            className={`h-8 text-xs font-bold cursor-pointer ${activeTab === 'corrections' ? 'bg-white shadow-sm hover:bg-white' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'}`}
+          >
+            Corrections {pendingCorrectionCount > 0 && <span className="ml-1 rounded-full bg-[#800000] px-1.5 py-0.5 text-[9px] text-white">{pendingCorrectionCount}</span>}
+          </Button>
           <Button
             onClick={() => setActiveTab('logs')}
             variant={activeTab === 'logs' ? 'secondary' : 'ghost'}
@@ -258,7 +273,7 @@ export function AttendanceMonitoring() {
               <Input
                 id="attendance-search"
                 type="search"
-                placeholder={activeTab === 'logs' ? "Search student, ID, company, or date..." : "Search student, ID, company, month, or status..."}
+                placeholder={activeTab === 'logs' ? "Search student, ID, company, or date..." : activeTab === 'corrections' ? "Search student, ID, date, or reason..." : "Search student, ID, company, month, or status..."}
                 className="pl-10 text-xs bg-slate-50 border-slate-200"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -363,12 +378,13 @@ export function AttendanceMonitoring() {
                   <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase">Hours Rendered</TableHead>
                   <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase">Geofence Validation</TableHead>
                   <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase">Log Coordinates</TableHead>
+                  <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase">Correction request</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredLogs.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-slate-400 font-semibold font-sans">
+                    <TableCell colSpan={8} className="text-center py-8 text-slate-400 font-semibold font-sans">
                       No punch log entries match selection.
                     </TableCell>
                   </TableRow>
@@ -405,12 +421,27 @@ export function AttendanceMonitoring() {
                           '—'
                         )}
                       </TableCell>
+                      <TableCell className="py-3 px-4">
+                        {log.correction ? (
+                          <div className="space-y-1.5">
+                            <Badge className={log.correction.status === 'Approved' ? 'bg-green-100 text-green-800' : log.correction.status === 'Rejected' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}>{log.correction.status}</Badge>
+                            {log.correction.status === 'Pending' && <Button size="sm" variant="outline" onClick={() => { setSelectedCorrection(log); setCorrectionRemarks(''); }} className="h-7 border-[#800000] text-[10px] font-bold text-[#800000]">Review request</Button>}
+                          </div>
+                        ) : <span className="text-[10px] text-slate-400">—</span>}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
               </TableBody>
             </Table>
           </CardContent>
+        </Card>
+      ) : activeTab === 'corrections' ? (
+        <Card className="shadow-sm border-slate-200">
+          <CardHeader className="border-b border-slate-100 pb-3"><CardTitle className="text-base font-bold text-slate-800">Attendance Correction Requests</CardTitle><CardDescription className="text-xs">Review requested changes with the original attendance data and permanent audit history.</CardDescription></CardHeader>
+          <CardContent className="p-0 overflow-x-auto"><Table><TableHeader><TableRow className="bg-slate-50/50"><TableHead>Student</TableHead><TableHead>Date</TableHead><TableHead>Original time</TableHead><TableHead>Requested time</TableHead><TableHead>Reason</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader><TableBody>
+            {correctionRequests.length === 0 ? <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-slate-400">No attendance correction requests found.</TableCell></TableRow> : correctionRequests.map(log => <TableRow key={log.id} className="text-xs"><TableCell><p className="font-bold">{log.studentName}</p><p className="text-[10px] text-slate-400">{log.studentNumber}</p></TableCell><TableCell>{log.date}</TableCell><TableCell>{log.correction.originalTimeIn} — {log.correction.originalTimeOut || 'Not recorded'}</TableCell><TableCell className="font-semibold text-[#800000]">{log.correction.requestedTimeIn} — {log.correction.requestedTimeOut || 'Not recorded'}</TableCell><TableCell className="max-w-56 whitespace-normal">{log.correction.reason}</TableCell><TableCell><Badge className={log.correction.status === 'Approved' ? 'bg-green-100 text-green-800' : log.correction.status === 'Rejected' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}>{log.correction.status}</Badge></TableCell><TableCell className="text-right">{log.correction.status === 'Pending' ? <Button size="sm" onClick={() => { setSelectedCorrection(log); setCorrectionRemarks(''); }} className="h-7 bg-[#800000] text-[10px]">Review</Button> : <span className="text-[10px] text-slate-500">{log.correction.approver || '—'}</span>}</TableCell></TableRow>)}
+          </TableBody></Table></CardContent>
         </Card>
       ) : (
         /* Tab 2: DTR Submissions list */
@@ -469,6 +500,25 @@ export function AttendanceMonitoring() {
         </Card>
       )}
 
+      <Dialog open={!!selectedCorrection} onOpenChange={(open) => !open && setSelectedCorrection(null)}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Review attendance correction</DialogTitle>
+            <DialogDescription>Approve only legitimate requests. The original time and complete decision history stay attached to the attendance record.</DialogDescription>
+          </DialogHeader>
+          {selectedCorrection?.correction && <div className="space-y-4 text-sm">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="font-bold text-slate-800">{selectedCorrection.studentName} · {selectedCorrection.date}</p>
+              <div className="mt-2 grid grid-cols-2 gap-3 text-xs"><div><p className="font-semibold text-slate-400">ORIGINAL</p><p>{selectedCorrection.correction.originalTimeIn} — {selectedCorrection.correction.originalTimeOut || 'Not recorded'}</p></div><div><p className="font-semibold text-slate-400">REQUESTED</p><p>{selectedCorrection.correction.requestedTimeIn} — {selectedCorrection.correction.requestedTimeOut || 'Not recorded'}</p></div></div>
+              <p className="mt-3 text-xs text-slate-600"><strong>Reason:</strong> {selectedCorrection.correction.reason}</p>
+            </div>
+            <div><Label htmlFor="correctionReviewRemarks">Decision remarks</Label><textarea id="correctionReviewRemarks" value={correctionRemarks} onChange={(event) => setCorrectionRemarks(event.target.value)} className="mt-1 min-h-20 w-full rounded-md border border-slate-200 p-2 text-sm" placeholder="Optional decision notes for the student and audit trail." /></div>
+            <div className="rounded-lg border border-slate-100 p-3"><p className="text-xs font-bold text-slate-700">Audit trail</p>{selectedCorrection.correction.auditTrail.map((entry: any) => <p key={`${entry.timestamp}-${entry.action}`} className="mt-1 text-[11px] text-slate-500"><strong>{entry.action}</strong> by {entry.actor} · {new Date(entry.timestamp).toLocaleString()}</p>)}</div>
+          </div>}
+          <DialogFooter><Button variant="outline" onClick={() => setSelectedCorrection(null)}>Cancel</Button><Button variant="outline" onClick={() => handleCorrectionDecision('Rejected')} className="border-red-200 text-red-700 hover:bg-red-50">Reject</Button><Button onClick={() => handleCorrectionDecision('Approved')} className="bg-green-600 hover:bg-green-700">Approve correction</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* DTR Audit Dialog */}
       <Dialog open={reviewDialogOpen} onOpenChange={(open) => {
         if (!open) {
@@ -476,7 +526,7 @@ export function AttendanceMonitoring() {
           setSelectedDtr(null);
         }
       }}>
-        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto font-sans p-6">
+        <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto font-sans p-6">
           <DialogHeader className="border-b pb-2 mb-2">
             <DialogTitle className="text-slate-900 font-sans font-bold flex items-center gap-2">
               <FileText className="h-5 w-5 text-[#800000]" />
@@ -489,57 +539,16 @@ export function AttendanceMonitoring() {
 
           {selectedDtr && (
             <div className="space-y-4">
-              {/* Actual printable DTR preview */}
-              <div className="bg-slate-100 rounded-lg border border-slate-200 overflow-hidden h-[420px]">
-                <iframe
-                  title={`Printable DTR preview for ${selectedDtr.studentName}`}
-                  src={`/print-dtr/${selectedDtr.id}?preview=1`}
-                  className="w-full h-full bg-white"
-                />
-              </div>
-
-              <div className="hidden">
-                <div className="text-center border-b pb-2 mb-3">
-                  <p className="font-bold text-[11px] uppercase tracking-wide">POLYTECHNIC UNIVERSITY OF THE PHILIPPINES</p>
-                  <p className="font-extrabold text-[#800000] text-xs pt-1.5 underline">DAILY TIME RECORD PREVIEW</p>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-y-1 bg-white p-2 rounded border text-[9.5px] mb-3 font-sans">
-                  <div><strong>Student:</strong> {selectedDtr.studentName}</div>
-                  <div><strong>Course & Section:</strong> {selectedDtr.section}</div>
-                  <div><strong>Company HTE:</strong> {selectedDtr.companyName}</div>
-                  <div><strong>Covered Period:</strong> {selectedDtr.startDate} to {selectedDtr.endDate}</div>
-                  <div><strong>Total Logged Hours:</strong> <strong className="text-[#800000]">{selectedDtr.totalHours.toFixed(2)} hours</strong></div>
-                </div>
-
-                <div className="border rounded overflow-hidden bg-white">
-                  <table className="w-full text-center text-[9.5px]">
-                    <thead>
-                      <tr className="bg-slate-100 border-b font-sans font-bold text-slate-550 text-[8.5px]">
-                        <th className="p-1 border-r">Date</th>
-                        <th className="p-1 border-r">Arrival (In)</th>
-                        <th className="p-1 border-r text-slate-400 font-normal">AM Out</th>
-                        <th className="p-1 border-r text-slate-400 font-normal">PM In</th>
-                        <th className="p-1 border-r">Departure (Out)</th>
-                        <th className="p-1 w-20">Hours</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {selectedDtr.logs.map((log: any, idx: number) => (
-                        <tr key={idx} className="hover:bg-slate-50/50">
-                          <td className="p-1 border-r font-bold text-slate-500 bg-slate-50/50">{log.date}</td>
-                          <td className="p-1 border-r text-slate-700 font-semibold">{log.timeIn}</td>
-                          <td className="p-1 border-r text-slate-350 font-sans italic text-[8px]">12:00 PM</td>
-                          <td className="p-1 border-r text-slate-350 font-sans italic text-[8px]">01:00 PM</td>
-                          <td className="p-1 border-r text-slate-700 font-semibold">{log.timeOut || '—'}</td>
-                          <td className="p-1 font-bold text-slate-805">{log.totalHours.toFixed(2)} hrs</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
+              <section className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                <div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-slate-900">Submission details</h3>{getDtrBadge(selectedDtr.status)}</div>
+                <p><span className="font-semibold text-slate-800">Student:</span> {selectedDtr.studentName} ({selectedDtr.studentNumber})</p>
+                <p><span className="font-semibold text-slate-800">Period:</span> {selectedDtr.startDate} to {selectedDtr.endDate}</p>
+                <p><span className="font-semibold text-slate-800">Total hours:</span> {selectedDtr.totalHours.toFixed(2)} hours</p>
+                <p><span className="font-semibold text-slate-800">Submitted:</span> {selectedDtr.submittedAt ? new Date(selectedDtr.submittedAt).toLocaleString() : 'Date and time not recorded'}</p>
+              </section>
+              <Button onClick={() => handleOpenDtrPdf(selectedDtr)} variant="outline" className="w-full border-[#800000]/30 text-xs font-semibold text-[#800000] hover:bg-red-50 hover:text-[#600000]">
+                <ExternalLink className="mr-2 h-4 w-4" /> View DTR PDF
+              </Button>
               {/* Audit Controls */}
               <div className="space-y-4 font-sans text-xs">
                 <div className="space-y-1.5">
@@ -554,19 +563,11 @@ export function AttendanceMonitoring() {
                 </div>
 
                 <div className="flex flex-wrap justify-between items-center gap-3 pt-3 border-t">
-                  <Button
-                    onClick={() => handlePrintDtr(selectedDtr.id)}
-                    variant="outline"
-                    className="text-xs border-slate-300 font-semibold flex items-center gap-1 px-3 cursor-pointer hover:bg-slate-50 hover:text-slate-900"
-                  >
-                    <Printer className="h-4 w-4" /> View Printable DTR PDF
-                  </Button>
-
                   <div className="flex gap-2">
                     <Button
                       onClick={() => handleReviewAction('Needs Revision')}
-                      variant="outline"
-                      className="text-xs border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-400 font-semibold flex items-center gap-1.5 px-4 cursor-pointer"
+                      variant="secondary"
+                      className="text-xs font-semibold flex items-center gap-1.5 px-4 cursor-pointer"
                     >
                       <X className="h-4 w-4" /> Request Revision
                     </Button>
@@ -586,3 +587,4 @@ export function AttendanceMonitoring() {
     </div>
   );
 }
+

@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { loadApiState, saveApiState } from '../lib/apiState';
 import { initialAuthorizedStudents as uploadedAuthorizedStudents } from '../data/initialAuthorizedStudents';
+import { PRIVACY_NOTICE_VERSION, PrivacyConsentRecord } from '../lib/privacy';
+import { demoControlsEnabled, isDemoMode } from '../lib/runtimeMode';
 
 export type UserRole = 'student' | 'adviser' | 'coordinator';
 export type AccountStatus = 'Pending Verification' | 'Verified' | 'Suspended';
@@ -24,6 +26,7 @@ export interface User {
   companyAddress?: string;
   passwordChanged?: boolean;
   emailVerified?: boolean;
+  privacyConsent?: PrivacyConsentRecord;
 }
 
 export interface PendingOtpVerification {
@@ -52,9 +55,10 @@ export interface AuthorizedStudent {
   otpRequestTimestamps?: string[];
 }
 
-interface AuthContextType {
+export interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string, role: UserRole) => LoginResult;
+  login: (email: string, password: string, role: UserRole, consent?: PrivacyConsentRecord) => LoginResult;
+  hasCurrentPrivacyConsent: (email: string, role: UserRole) => boolean;
   registerAccount: (account: User) => { success: boolean; error?: string };
   verifyEmail: (email: string) => void;
   getPendingOtp: () => PendingOtpVerification | null;
@@ -86,6 +90,8 @@ export const DEFAULT_STUDENT_PASSWORD = 'PUPrs@1904';
 const MAX_OTP_REQUESTS_PER_HOUR = 5;
 const MAX_FAILED_OTP_ATTEMPTS = 5;
 const OTP_LOCKOUT_MS = 15 * 60 * 1000;
+const sidebarPreferenceKey = 'intrack.sidebarCollapsed';
+const privacyConsentsKey = 'privacyConsents';
 
 const passwordRules = [
   (value: string) => value.length >= 8,
@@ -97,12 +103,73 @@ const passwordRules = [
 
 interface AuthDatabaseState {
   registeredAccounts?: User[];
+  privacyConsents?: PrivacyConsentRecord[];
+}
+
+function readStoredArray<T>(key: string): T[] {
+  const value = localStorage.getItem(key);
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    localStorage.removeItem(key);
+    return [];
+  }
+}
+
+function readStoredObject<T extends object>(key: string): T | null {
+  const value = localStorage.getItem(key);
+  if (!value) return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as T : null;
+  } catch {
+    localStorage.removeItem(key);
+    return null;
+  }
 }
 
 function getAuthDatabaseSnapshot(): AuthDatabaseState {
   return {
-    registeredAccounts: JSON.parse(localStorage.getItem(registeredAccountsKey) || '[]'),
+    registeredAccounts: readStoredArray<User>(registeredAccountsKey),
+    privacyConsents: readStoredArray<PrivacyConsentRecord>(privacyConsentsKey),
   };
+}
+
+function getPrivacyConsents(): PrivacyConsentRecord[] {
+  return readStoredArray<PrivacyConsentRecord>(privacyConsentsKey);
+}
+
+function findCurrentPrivacyConsent(email: string, role: UserRole) {
+  const normalizedEmail = email.trim().toLowerCase();
+  return getPrivacyConsents().find(
+    (record) => record.email.toLowerCase() === normalizedEmail && record.role === role && record.version === PRIVACY_NOTICE_VERSION,
+  );
+}
+
+function isValidPrivacyConsent(consent?: PrivacyConsentRecord) {
+  if (!consent || consent.version !== PRIVACY_NOTICE_VERSION || Number.isNaN(Date.parse(consent.acceptedAt))) return false;
+  return new Date(consent.acceptedAt).getTime() <= Date.now() + 60_000;
+}
+
+function savePrivacyConsent(consent: PrivacyConsentRecord) {
+  const normalizedConsent = { ...consent, email: consent.email.trim().toLowerCase() };
+  const remaining = getPrivacyConsents().filter(
+    (record) => !(record.email.toLowerCase() === normalizedConsent.email && record.role === normalizedConsent.role && record.version === normalizedConsent.version),
+  );
+  localStorage.setItem(privacyConsentsKey, JSON.stringify([...remaining, normalizedConsent]));
+  persistAuthDatabaseSnapshot();
+  fetch('/api/privacy-consents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(normalizedConsent),
+  }).catch((error) => {
+    console.error('Failed to save the privacy consent audit record.', error);
+  });
+  return normalizedConsent;
 }
 
 function persistAuthDatabaseSnapshot() {
@@ -129,8 +196,7 @@ function mergeRequiredAuthorizedStudents(students: AuthorizedStudent[]) {
 }
 
 function getRegisteredAccounts(): User[] {
-  const savedAccounts = localStorage.getItem(registeredAccountsKey);
-  const parsedAccounts = savedAccounts ? JSON.parse(savedAccounts) : [];
+  const parsedAccounts = readStoredArray<User>(registeredAccountsKey);
   const demoEmails = ['sarah.johnson@university.edu', 'david.martinez@university.edu', 'lisa.wang@university.edu'];
   const accounts = parsedAccounts.filter(
     (account: User) => account.id !== 'test-jaira-masarate' && !demoEmails.includes(account.email.toLowerCase()),
@@ -157,7 +223,7 @@ function getAuthorizedStudentRecords(): AuthorizedStudent[] {
   const demoEmails = ['sarah.johnson@university.edu', 'david.martinez@university.edu', 'lisa.wang@university.edu'];
 
   if (savedStudents) {
-    let students = JSON.parse(savedStudents);
+    let students = readStoredArray<AuthorizedStudent>(authorizedStudentsKey);
     students = students.filter((s: AuthorizedStudent) => !demoEmails.includes(s.email.toLowerCase()));
     const mergedStudents = mergeRequiredAuthorizedStudents(students);
 
@@ -312,9 +378,12 @@ function savePendingOtp(email: string, role: UserRole, purpose: PendingOtpVerifi
   };
 
   localStorage.setItem(pendingOtpKey, JSON.stringify(pendingOtp));
-  localStorage.setItem(otpPreviewKey, code);
-  console.log("Generated OTP for student (" + normalizedEmail + "):", code);
-  sendOtpToWebmail(normalizedEmail, code, purpose);
+  if (demoControlsEnabled) {
+    localStorage.setItem(otpPreviewKey, code);
+  } else {
+    localStorage.removeItem(otpPreviewKey);
+  }
+  if (!isDemoMode) sendOtpToWebmail(normalizedEmail, code, purpose);
   updateAuthorizedStudent(normalizedEmail, (record) => ({
     ...record,
     otpRequestTimestamps: [...activeRequests, new Date().toISOString()],
@@ -323,8 +392,7 @@ function savePendingOtp(email: string, role: UserRole, purpose: PendingOtpVerifi
 }
 
 function getPendingOtpRecord(): PendingOtpVerification | null {
-  const savedOtp = localStorage.getItem(pendingOtpKey);
-  return savedOtp ? JSON.parse(savedOtp) : null;
+  return readStoredObject<PendingOtpVerification>(pendingOtpKey);
 }
 
 function createAccountFromAuthorizedStudent(student: AuthorizedStudent): User {
@@ -348,9 +416,8 @@ function createAccountFromAuthorizedStudent(student: AuthorizedStudent): User {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     // The active browser session stays local; account records sync through MySQL.
-    const savedUser = localStorage.getItem('user');
-    if (savedUser) {
-      const parsed = JSON.parse(savedUser) as User;
+    const parsed = readStoredObject<User>('user');
+    if (parsed) {
       if (parsed.role === 'student' && parsed.name) {
         parsed.name = formatNameWithMiddleInitial(parsed.name);
       }
@@ -387,6 +454,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (databaseState.registeredAccounts) {
           localStorage.setItem(registeredAccountsKey, JSON.stringify(databaseState.registeredAccounts));
+        }
+        if (databaseState.privacyConsents) {
+          localStorage.setItem(privacyConsentsKey, JSON.stringify(databaseState.privacyConsents));
         }
       })
       .catch((error) => {
@@ -451,7 +521,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return undefined;
   };
 
-  const login = (email: string, password: string, role: UserRole) => {
+  const hasCurrentPrivacyConsent = (email: string, role: UserRole) => Boolean(findCurrentPrivacyConsent(email, role));
+
+  const login = (email: string, password: string, role: UserRole, consent?: PrivacyConsentRecord) => {
     const normalizedEmail = email.trim().toLowerCase();
 
     if (role === 'student') {
@@ -483,6 +555,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const requiresActivationOtp = !existingStudentAccount?.passwordChanged;
+
+      const existingConsent = findCurrentPrivacyConsent(normalizedEmail, role);
+      if (!existingConsent && !isValidPrivacyConsent(consent)) {
+        return { success: false, error: 'Please review and accept the current Data Privacy Notice to continue.' };
+      }
+      const activeConsent = existingConsent || savePrivacyConsent({ ...consent!, email: normalizedEmail, role });
 
       if (requiresActivationOtp) {
         const otpResult = savePendingOtp(normalizedEmail, role, 'activation');
@@ -521,7 +599,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: 'Incorrect password. Please try again.' };
     }
 
-    setUser(account);
+    const existingConsent = findCurrentPrivacyConsent(normalizedEmail, role);
+    if (!existingConsent && !isValidPrivacyConsent(consent)) {
+      return { success: false, error: 'Please review and accept the current Data Privacy Notice to continue.' };
+    }
+    const activeConsent = existingConsent || savePrivacyConsent({ ...consent!, email: normalizedEmail, role });
+
+    const signedInAccount = { ...account, privacyConsent: activeConsent };
+    if (getRegisteredAccounts().some((registeredAccount) => registeredAccount.id === account.id)) {
+      saveRegisteredAccounts(
+        getRegisteredAccounts().map((registeredAccount) => registeredAccount.id === account.id ? signedInAccount : registeredAccount),
+      );
+    }
+
+    sessionStorage.removeItem(sidebarPreferenceKey);
+    setUser(signedInAccount);
     return { success: true };
   };
 
@@ -629,10 +721,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const findVerifiedOtpAccount = () => {
-    const savedVerifiedOtp = localStorage.getItem(verifiedOtpKey);
-    if (!savedVerifiedOtp) return undefined;
-
-    const verifiedOtp = JSON.parse(savedVerifiedOtp) as { email: string; role: UserRole };
+    const verifiedOtp = readStoredObject<{ email: string; role: UserRole }>(verifiedOtpKey);
+    if (!verifiedOtp) return undefined;
     return getRegisteredAccounts().find(
       (account) => account.email.toLowerCase() === verifiedOtp.email && account.role === verifiedOtp.role,
     );
@@ -645,6 +735,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: 'Your verified session was not found. Please log in again.' };
     }
 
+    sessionStorage.removeItem(sidebarPreferenceKey);
     setUser(account);
     localStorage.removeItem(verifiedOtpKey);
     return { success: true };
@@ -652,9 +743,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const changePasswordAfterOtp = (newPassword: string) => {
     const account = findVerifiedOtpAccount();
-    const verifiedOtp = JSON.parse(localStorage.getItem(verifiedOtpKey) || '{}') as {
+    const verifiedOtp = readStoredObject<{
       purpose?: PendingOtpVerification['purpose'];
-    };
+    }>(verifiedOtpKey) || {};
 
     if (!account) {
       return { success: false, error: 'Your verified session was not found. Please log in again.' };
@@ -684,6 +775,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ),
     );
 
+    if (verifiedOtp.purpose !== 'passwordReset') {
+      sessionStorage.removeItem(sidebarPreferenceKey);
+    }
     setUser(verifiedOtp.purpose === 'passwordReset' ? null : updatedAccount);
     updateAuthorizedStudent(updatedAccount.email, (student) => ({
       ...student,
@@ -861,6 +955,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     setUser(null);
+    sessionStorage.removeItem(sidebarPreferenceKey);
     localStorage.removeItem(pendingOtpKey);
     localStorage.removeItem(verifiedOtpKey);
     localStorage.removeItem(otpPreviewKey);
@@ -871,6 +966,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         login,
+        hasCurrentPrivacyConsent,
         registerAccount,
         verifyEmail,
         getPendingOtp,
@@ -902,3 +998,6 @@ export function useAuth() {
   }
   return context;
 }
+
+/** Bridge saved backend data into the unchanged original module components. */
+export const ProtectedAuthProvider = AuthContext.Provider;

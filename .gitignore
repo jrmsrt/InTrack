@@ -1,2 +1,8 @@
 node_modules
 .env
+dist
+__pycache__/
+*.py[cod]
+*.log
+supabase/.temp/
+backups/

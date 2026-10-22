@@ -22,7 +22,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  Download,
+  ExternalLink,
   FileText
 } from 'lucide-react';
 import {
@@ -41,10 +41,22 @@ export function JournalReview() {
   const [sectionFilter, setSectionFilter] = useState('all');
   const [programFilter, setProgramFilter] = useState('all');
   const [weekNumberFilter, setWeekNumberFilter] = useState('all');
-  const [selectedJournal, setSelectedJournal] = useState<{ studentId: string; studentName: string; studentNumber: string; section: string; program: string; companyName: string; journalId: string; weekNumber: number; startDate: string; endDate: string; tasks: any[]; reflection: string; problems: string; totalHours: number; status: string; remarks?: string } | null>(null);
+  const [selectedJournal, setSelectedJournal] = useState<{ studentId: string; studentName: string; studentNumber: string; section: string; program: string; companyName: string; journalId: string; weekNumber: number; startDate: string; endDate: string; tasks: any[]; reflection: string; problems: string; totalHours: number; status: string; remarks?: string; submittedAt?: string } | null>(null);
   const [remarks, setRemarks] = useState('');
-  const [previewZoom, setPreviewZoom] = useState(0.78);
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+
+  const formatSubmissionDate = (value?: string) => {
+    if (!value) return 'Date and time not recorded';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(parsed);
+  };
 
   const getComparableSection = (section: string) => {
     const normalizedSection = section.trim().toUpperCase();
@@ -70,6 +82,7 @@ export function JournalReview() {
       totalHours: j.totalHours,
       status: j.status,
       remarks: j.remarks,
+      submittedAt: j.submittedAt,
       studentId: s.studentId,
       studentName: s.name,
       studentNumber: s.studentNumber,
@@ -96,15 +109,17 @@ export function JournalReview() {
 
   const weekNumberOptions = Array.from(new Set(allJournals.map(j => j.weekNumber))).sort((a, b) => a - b);
 
-  const handleReviewAction = (status: 'Approved' | 'Needs Revision') => {
+  const handleReviewAction = async (status: 'Approved' | 'Needs Revision') => {
     if (!selectedJournal) return;
 
-    reviewWeeklyJournal(selectedJournal.studentId, selectedJournal.journalId, status, remarks);
+    try {
+    await reviewWeeklyJournal(selectedJournal.studentId, selectedJournal.journalId, status, remarks);
     toast.success(`Weekly Journal for Week ${selectedJournal.weekNumber} is now ${status === 'Approved' ? 'Approved' : 'Returned'}`);
     
     setReviewDialogOpen(false);
     setSelectedJournal(null);
     setRemarks('');
+    } catch(error) { toast.error(error instanceof Error?error.message:'Review was not saved.'); }
   };
 
   const getStatusBadge = (status: string) => {
@@ -140,85 +155,12 @@ export function JournalReview() {
     }));
     setSelectedJournal(journal);
     setRemarks('');
-    setPreviewZoom(0.78);
     setReviewDialogOpen(true);
   };
 
-  const escapeHtml = (value: string) =>
-    value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-
-  const handleDownloadJournal = (journal: typeof selectedJournal) => {
-    if (!journal) return;
-
-    const taskRows = journal.tasks.map((task: any) => `
-      <tr>
-        <td>${escapeHtml(task.date || '')}</td>
-        <td>${escapeHtml(task.title || '')}</td>
-        <td>${escapeHtml(task.description || '')}</td>
-        <td>${escapeHtml(task.output || '')}</td>
-      </tr>
-    `).join('');
-
-    const html = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Weekly Journal Week ${journal.weekNumber}</title>
-    <style>
-      body { font-family: Arial, Helvetica, sans-serif; color: #111827; margin: 32px; }
-      h1 { font-size: 18px; margin: 0 0 4px; text-align: center; }
-      h2 { font-size: 14px; margin: 0 0 24px; text-align: center; color: #800000; }
-      .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; font-size: 12px; margin-bottom: 20px; }
-      .label { color: #64748b; font-weight: 700; }
-      table { width: 100%; border-collapse: collapse; margin: 16px 0 22px; font-size: 11px; }
-      th, td { border: 1px solid #cbd5e1; padding: 8px; vertical-align: top; text-align: left; }
-      th { background: #f8fafc; color: #475569; text-transform: uppercase; font-size: 10px; }
-      section { margin-top: 18px; }
-      section h3 { font-size: 13px; margin-bottom: 8px; color: #800000; }
-      p { font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
-    </style>
-  </head>
-  <body>
-    <h1>POLYTECHNIC UNIVERSITY OF THE PHILIPPINES</h1>
-    <h2>Weekly Journal Report - Week ${journal.weekNumber}</h2>
-    <div class="meta">
-      <div><span class="label">Student:</span> ${escapeHtml(journal.studentName)}</div>
-      <div><span class="label">Student No.:</span> ${escapeHtml(journal.studentNumber)}</div>
-      <div><span class="label">Program/Section:</span> ${escapeHtml(journal.program)} / ${escapeHtml(journal.section)}</div>
-      <div><span class="label">Company:</span> ${escapeHtml(journal.companyName)}</div>
-      <div><span class="label">Period:</span> ${escapeHtml(journal.startDate)} to ${escapeHtml(journal.endDate)}</div>
-      <div><span class="label">Total Hours:</span> ${journal.totalHours} hrs</div>
-    </div>
-    <table>
-      <thead>
-        <tr><th>Date</th><th>Task</th><th>Description</th><th>Output</th></tr>
-      </thead>
-      <tbody>${taskRows || '<tr><td colspan="4">No task rows recorded.</td></tr>'}</tbody>
-    </table>
-    <section>
-      <h3>Relevant Skills and Competencies</h3>
-      <p>${escapeHtml(journal.reflection)}</p>
-    </section>
-    <section>
-      <h3>Problems Encountered</h3>
-      <p>${escapeHtml(journal.problems)}</p>
-    </section>
-  </body>
-</html>`;
-
-    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `Weekly_Journal_Week_${journal.weekNumber}_${journal.studentName.replace(/\s+/g, '_')}.html`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+  const handleViewDocument = () => {
+    if (!selectedJournal) return;
+    window.open(`/print-weekly-journal/${selectedJournal.journalId}?preview=1&zoom=1`, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -365,7 +307,7 @@ export function JournalReview() {
       {/* Review Dialog Document Preview style */}
       {selectedJournal && (
         <Dialog open={reviewDialogOpen} onOpenChange={() => setReviewDialogOpen(false)}>
-          <DialogContent className="sm:max-w-3xl h-[88vh] overflow-hidden font-sans flex flex-col">
+          <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto font-sans">
             <DialogHeader>
               <DialogTitle>Audit Weekly Report Journal</DialogTitle>
               <DialogDescription>
@@ -373,42 +315,26 @@ export function JournalReview() {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="py-4 space-y-5 text-xs flex-1 min-h-0 overflow-hidden pr-1">
-              <div className="flex items-center justify-end gap-2">
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="outline"
-                  onClick={() => setPreviewZoom((zoom) => Math.max(0.55, Number((zoom - 0.1).toFixed(2))))}
-                  className="h-8 w-8 border-slate-300 text-slate-700 hover:bg-slate-50 cursor-pointer text-lg leading-none"
-                  aria-label="Zoom out"
-                >
-                  -
-                </Button>
-                <span className="w-12 text-center text-[11px] font-semibold text-slate-500">{Math.round(previewZoom * 100)}%</span>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="outline"
-                  onClick={() => setPreviewZoom((zoom) => Math.min(1.1, Number((zoom + 0.1).toFixed(2))))}
-                  className="h-8 w-8 border-slate-300 text-slate-700 hover:bg-slate-50 cursor-pointer text-lg leading-none"
-                  aria-label="Zoom in"
-                >
-                  +
-                </Button>
-              </div>
+            <div className="space-y-4">
+              <section className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-semibold text-slate-900">Submission details</h3>
+                  {getStatusBadge(selectedJournal.status)}
+                </div>
+                <p><span className="font-semibold text-slate-800">Student:</span> {selectedJournal.studentName} ({selectedJournal.studentNumber})</p>
+                <p><span className="font-semibold text-slate-800">Program and section:</span> {selectedJournal.program} / {selectedJournal.section}</p>
+                <p><span className="font-semibold text-slate-800">Journal period:</span> Week {selectedJournal.weekNumber}, {selectedJournal.startDate} to {selectedJournal.endDate}</p>
+                <p><span className="font-semibold text-slate-800">Company:</span> {selectedJournal.companyName}</p>
+                <p><span className="font-semibold text-slate-800">Total hours:</span> {selectedJournal.totalHours} hrs</p>
+                <p><span className="font-semibold text-slate-800">Submitted:</span> {formatSubmissionDate(selectedJournal.submittedAt)}</p>
+              </section>
 
-              {/* Actual weekly journal file preview */}
-              <div className="bg-slate-100 rounded-lg border border-slate-200 overflow-auto h-[420px] max-w-full">
-                <iframe
-                  title={`Weekly Journal Week ${selectedJournal.weekNumber} preview`}
-                  src={`/print-weekly-journal/${selectedJournal.journalId}?preview=1&zoom=${previewZoom}`}
-                  className="w-full h-full bg-white"
-                />
-              </div>
+              <Button type="button" variant="outline" className="w-full" onClick={handleViewDocument}>
+                <ExternalLink className="mr-2 h-4 w-4" /> View Document
+              </Button>
 
               {/* Remarks Field */}
-              <div className="space-y-1.5 pt-2">
+              <div className="space-y-1.5">
                 <Label htmlFor="journalRemarks" className="text-xs">Add Adviser Remarks / Remarks</Label>
                 <Input
                   id="journalRemarks"
@@ -417,20 +343,11 @@ export function JournalReview() {
                   onChange={(e) => setRemarks(e.target.value)}
                 />
               </div>
-            </div>
-
             <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
               <Button
-                variant="outline"
-                onClick={() => handleDownloadJournal(selectedJournal)}
-                className="text-xs border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
-              >
-                <Download className="h-3.5 w-3.5 mr-1" /> Download File
-              </Button>
-              <Button
-                variant="outline"
+                variant="secondary"
                 onClick={() => handleReviewAction('Needs Revision')}
-                className="text-xs border-amber-300 text-amber-800 hover:bg-amber-50 hover:text-amber-900 hover:border-amber-400 cursor-pointer"
+                className="text-xs cursor-pointer"
               >
                 <X className="h-3.5 w-3.5 mr-1" /> Return for Revision
               </Button>
@@ -441,6 +358,7 @@ export function JournalReview() {
                 <Check className="h-3.5 w-3.5 mr-1" /> Endorse Weekly Report
               </Button>
             </DialogFooter>
+            </div>
           </DialogContent>
         </Dialog>
       )}

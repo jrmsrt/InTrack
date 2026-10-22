@@ -1,3 +1,7 @@
+import {StudentClassJoin} from '../../components/forms/StudentClassJoin';
+import {officialOjtCoordinator} from '../../data/institution';
+import { enrollmentPendingMessage } from '../../lib/studentEnrollmentAccess';
+import { welcomeName } from '../../lib/welcomeName';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -23,7 +27,7 @@ import {
 
 export function StudentDashboard() {
   const { user } = useAuth();
-  const { students, timeIn, timeOut, mockLocation } = useOJT();
+  const { students, announcements, timeIn, timeOut, mockLocation, isBackendConnected, studentEnrollmentStatus } = useOJT();
   const navigate = useNavigate();
 
   const student = students.find(s => s.studentId === user?.id || s.email === user?.email);
@@ -37,7 +41,8 @@ export function StudentDashboard() {
     );
   }
 
-  const isCleared = student.stage !== 'Stage 1: Pre-OJT';
+  const enrollmentLocked = studentEnrollmentStatus === 'not_enrolled';
+  const isCleared = !enrollmentLocked && student.stage !== 'Stage 1: Pre-OJT';
   
   // Attendance calculation
   const todayDate = new Date().toISOString().split('T')[0];
@@ -65,9 +70,10 @@ export function StudentDashboard() {
   };
 
   const completionPct = Math.min(
-    Math.round((student.totalHoursRendered / student.requiredHours) * 100),
+    student.requiredHours > 0 ? Math.round((student.totalHoursRendered / student.requiredHours) * 100) : 0,
     100
   );
+  const studentAnnouncements = announcements.filter(announcement => announcement.targetRole === 'all' || announcement.targetRole === 'student');
 
   // Pre-OJT stats
   const preOjtTotal = student.preOJTRequirements.length;
@@ -81,10 +87,11 @@ export function StudentDashboard() {
       <div className="bg-gradient-to-r from-[#800000] to-[#550000] text-white p-6 rounded-2xl shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-wider">Intern Portal</span>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Welcome back, {student.name}!</h1>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight mt-1">Welcome back, {welcomeName(student.name)}!</h1>
           <p className="text-white/80 text-sm mt-1 font-light">
             Section: <span className="font-semibold">{student.section}</span> | Adviser: <span className="font-semibold">{student.adviserName}</span>
           </p>
+          <p className="text-white/80 text-xs mt-1 font-light">{officialOjtCoordinator.title}: {officialOjtCoordinator.name}</p>
         </div>
         <div className="bg-white/10 px-4 py-2.5 rounded-xl border border-white/20">
           <p className="text-xs text-white/70">Assigned Partner HTE:</p>
@@ -98,23 +105,25 @@ export function StudentDashboard() {
           <CardContent className="p-4 flex gap-3.5 items-start">
             <AlertTriangle className="h-5.5 w-5.5 text-amber-600 shrink-0 mt-0.5" />
             <div>
-              <h4 className="font-bold text-amber-900 text-sm">Deployment Lock Active</h4>
+              <h4 className="font-bold text-amber-900 text-sm">{enrollmentLocked ? 'OJT Enrollment Pending' : 'Deployment Lock Active'}</h4>
               <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-                “Complete and wait for approval of your Pre-OJT requirements before accessing During-OJT features.”
+                {enrollmentLocked ? enrollmentPendingMessage : 'Complete and wait for approval of your Pre-OJT requirements before accessing During-OJT features.'}
               </p>
               <div className="flex gap-4 mt-3">
-                <Button 
+                <Button variant="secondary" 
                   size="sm" 
+                  disabled={enrollmentLocked}
                   onClick={() => navigate('/pre-ojt')}
-                  className="bg-amber-600 hover:bg-amber-700 text-white text-xs h-8"
+                  className="text-xs h-8"
                 >
                   Verify Pre-OJT Checklist <ArrowRight className="h-3.5 w-3.5 ml-1" />
                 </Button>
                 <Button 
                   size="sm" 
-                  variant="outline" 
+                  variant="secondary" 
+                  disabled={enrollmentLocked}
                   onClick={() => navigate('/moa')}
-                  className="border-amber-300 text-amber-800 hover:bg-amber-100 text-xs h-8"
+                  className="text-xs h-8"
                 >
                   Track MOA Progress
                 </Button>
@@ -123,6 +132,8 @@ export function StudentDashboard() {
           </CardContent>
         </Card>
       )}
+
+      {isBackendConnected&&<StudentClassJoin/>}
 
       {/* Status Overview Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -269,7 +280,7 @@ export function StudentDashboard() {
                     iconColor: "text-amber-600 dark:text-amber-400",
                     iconBg: "bg-amber-50 dark:bg-amber-950/40",
                     hoverBorder: "hover:border-amber-200 dark:hover:border-amber-900/50",
-                    hoverBg: "hover:bg-amber-50/10 dark:hover:bg-amber-950/10",
+                    hoverBg: "hover:bg-slate-100 dark:hover:bg-slate-800",
                     requiresClearance: true,
                   },
                   {
@@ -296,7 +307,7 @@ export function StudentDashboard() {
                   }
                 ].map((link, idx) => {
                   const Icon = link.icon;
-                  const isDisabled = link.requiresClearance && !isCleared;
+                  const isDisabled = enrollmentLocked || (link.requiresClearance && !isCleared);
                   return (
                     <button
                       key={idx}
@@ -369,13 +380,36 @@ export function StudentDashboard() {
             )}
 
             {/* General welcome notification */}
+            {studentAnnouncements.slice(0, 2).map(announcement => (
+              <div key={announcement.id} className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 font-semibold text-slate-800">
+                    <MessageSquare className="h-3.5 w-3.5 text-[#800000]" />
+                    {announcement.title}
+                  </div>
+                  <Badge className={
+                    announcement.priority === 'Urgent'
+                      ? 'bg-red-100 text-red-800 hover:bg-red-100'
+                      : announcement.priority === 'Important'
+                        ? 'bg-amber-100 text-amber-800 hover:bg-amber-100'
+                        : 'bg-blue-100 text-blue-800 hover:bg-blue-100'
+                  }>
+                    {announcement.priority}
+                  </Badge>
+                </div>
+                <p className="text-slate-600 mt-1 leading-relaxed">
+                  {announcement.message}
+                </p>
+              </div>
+            ))}
+
             <div className="p-3 bg-red-50/40 border border-red-100/50 rounded-lg text-xs">
               <div className="flex items-center gap-1.5 font-semibold text-[#800000]">
                 <CheckCircle2 className="h-3.5 w-3.5 text-[#800000]" />
-                OJT Program Intake Cleared
+                {isBackendConnected?'Student Account Verified':'OJT Program Intake Cleared'}
               </div>
               <p className="text-slate-500 mt-1 leading-relaxed">
-                Resume approved by section Adviser Michael Chen. Ensure consent slips are notarized.
+                {isBackendConnected?'Saved requirements, adviser feedback and coordinator announcements are shown in this portal.':'Resume approved by section Adviser Michael Chen. Ensure consent slips are notarized.'}
               </p>
             </div>
           </CardContent>

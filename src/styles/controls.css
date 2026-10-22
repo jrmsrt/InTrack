@@ -1,0 +1,156 @@
+/* Shared interaction styles, including native controls and Radix triggers.
+   Kept outside Tailwind layers so legacy page cursor utilities cannot win. */
+:is(button, a[href], select, summary, input[type="button"], input[type="submit"],
+    input[type="reset"], input[type="checkbox"], input[type="radio"],
+    input[type="file"], [role="button"], [role="link"], [role="tab"],
+    [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"],
+    [role="option"], [role="checkbox"], [role="radio"], [role="switch"],
+    [role="combobox"], [role="slider"], [data-interactive="true"]) {
+  cursor: pointer;
+}
+
+:is(button, a[href], select, summary, [role="button"], [role="tab"],
+    [role="combobox"], [data-interactive="true"]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+:is(button, input, select, textarea):disabled,
+[aria-disabled="true"], [data-disabled]:not([data-disabled="false"]) {
+  cursor: not-allowed;
+}
+
+/* Native disabled controls still receive hover so their cursor is visible;
+   the native disabled attribute continues to prevent activation. */
+button:disabled {
+  pointer-events: auto;
+  opacity: 0.5;
+}
+
+/* One baseline for shared tables and legacy native screen tables. Calendar
+   grids and printable document routes intentionally retain their own layout.
+   Screen-only rules preserve the existing printed document formatting. */
+@media screen {
+  :is([data-slot="table"], .intrack-table) {
+    font-family: inherit;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--color-slate-700);
+    border-collapse: collapse;
+  }
+
+  :is([data-slot="table"], .intrack-table) :is(th, td) {
+    padding: 0.75rem 1rem;
+    font-family: inherit;
+    line-height: 1.5;
+  }
+
+  :is([data-slot="table"], .intrack-table) thead {
+    background: var(--color-slate-50);
+  }
+
+  :is([data-slot="table"], .intrack-table) thead :is(th, td) {
+    height: 3rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-slate-600);
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  :is([data-slot="table"], .intrack-table) tbody td {
+    font-size: 0.875rem;
+    font-weight: 400;
+    color: var(--color-slate-700);
+  }
+
+  :is([data-slot="table"], .intrack-table) tr {
+    border-bottom: 1px solid var(--color-slate-200);
+    transition: background-color 150ms;
+  }
+
+  :is([data-slot="table"], .intrack-table) tbody tr:hover {
+    background-color: var(--color-slate-50);
+  }
+
+  :is([data-slot="table"], .intrack-table) tr[data-state="selected"] {
+    background-color: var(--color-slate-100);
+  }
+
+  /* Nested text inherits the same scale; status badges keep deliberate color
+     and emphasis. Status badges have a readable 12px baseline. */
+  :is([data-slot="table"], .intrack-table) td :is(p, span, a, div) {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: 1.5;
+  }
+
+  :is([data-slot="table"], .intrack-table) td [data-slot="badge"] {
+    font-size: 0.75rem;
+  }
+
+  :is([data-slot="table"], .intrack-table) td :is(.font-bold, .font-extrabold, .font-semibold) {
+    font-weight: 500;
+  }
+
+  :is([data-slot="table"], .intrack-table) tbody tr > td[colspan]:only-child {
+    padding-block: 2rem;
+    color: var(--color-slate-500);
+    font-size: 0.875rem;
+    font-weight: 400;
+  }
+
+  :is([data-slot="table"], .intrack-table) :is(button, [data-slot="button"]) {
+    min-height: 2rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.5;
+    padding-block: 0.375rem;
+  }
+
+  :is([data-slot="table"], .intrack-table) :is(button, [data-slot="button"]) svg {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+  }
+
+  @media (pointer: coarse) {
+    :is([data-slot="table"], .intrack-table) :is(button, [data-slot="button"]) {
+      min-width: 2.75rem;
+      min-height: 2.75rem;
+    }
+  }
+}
+
+
+/* Checklist-specific spacing overrides the legacy shared table baseline. */
+@media screen {
+  .requirement-checklist .intrack-table thead th {
+    height: auto;
+    padding-block: 0.625rem;
+    white-space: nowrap;
+  }
+
+  .requirement-checklist .intrack-table :is(th, td):first-child {
+    width: 46%;
+    padding-inline: 1.5rem 2rem;
+  }
+
+  .requirement-checklist .intrack-table th:nth-child(2) { width: 22%; }
+  .requirement-checklist .intrack-table th:nth-child(3),
+  .requirement-checklist .intrack-table th:nth-child(4) { width: 16%; }
+
+  .requirement-checklist .intrack-table tbody td {
+    padding-block: 1rem;
+    vertical-align: middle;
+  }
+
+  .requirement-checklist .intrack-table td .requirement-description {
+    display: block;
+    margin-top: 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--color-slate-500);
+  }
+}

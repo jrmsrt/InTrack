@@ -60,7 +60,7 @@ function ResourceList({ items }: { items: { title: string; href?: string }[] }) 
             <a
               href={item.href}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="text-slate-650 hover:text-[#800000] hover:underline flex items-center gap-1 font-medium cursor-pointer transition-colors"
             >
               {item.title}
@@ -145,7 +145,7 @@ export function AdviserFormsTemplates() {
             <a
               href="https://drive.google.com/file/d/1kLIANF_2C6lJL_70VRGvBpcAsj_5OmdI/view?usp=sharing"
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="flex items-center gap-1.5"
             >
               <Download className="h-4 w-4" />

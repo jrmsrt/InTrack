@@ -1,168 +1,20 @@
-import React, { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff, XCircle } from 'lucide-react';
-import { useAuth, DEFAULT_STUDENT_PASSWORD } from '../../context/AuthContext';
-import { BrandedHeader } from '../../components/BrandedHeader';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/input';
-import { Label } from '../../components/ui/label';
-
-const passwordRules = [
-  { label: 'At least 8 characters', test: (value: string) => value.length >= 8 },
-  { label: 'At least 1 uppercase letter (A-Z)', test: (value: string) => /[A-Z]/.test(value) },
-  { label: 'At least 1 lowercase letter (a-z)', test: (value: string) => /[a-z]/.test(value) },
-  { label: 'At least 1 number (0-9)', test: (value: string) => /\d/.test(value) },
-  { label: 'At least 1 special character (e.g., @, #, $, %, etc.)', test: (value: string) => /[^A-Za-z0-9]/.test(value) },
-];
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { useProtectedIdentity } from '../../context/useProtectedIdentity';
+import { completePasswordDecision } from '../../lib/passwordDecision';
+import { PasswordChangePage } from '../../components/auth/PasswordChangePage';
 
 export function ChangePassword() {
   const navigate = useNavigate();
-  const { changePasswordAfterOtp } = useAuth();
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [error, setError] = useState('');
+  const location = useLocation();
+  const { result } = useProtectedIdentity(true);
 
-  const ruleResults = useMemo(
-    () => passwordRules.map((rule) => ({ ...rule, passed: rule.test(newPassword) })),
-    [newPassword],
-  );
-  const passwordsMatch = Boolean(confirmPassword) && newPassword === confirmPassword;
-  const reusesDefaultPassword = newPassword === DEFAULT_STUDENT_PASSWORD;
-  const canSubmit = ruleResults.every((rule) => rule.passed) && passwordsMatch && !reusesDefaultPassword;
+  if (result.state === 'loaded' && result.identity.state === 'mfa_required') return <Navigate to="/verify-authenticator" replace state={location.state} />;
+  if (result.state === 'signed_out') return <Navigate to="/login" replace />;
+  if (result.state === 'loaded' && (!('whitelisted' in result.identity) || !result.identity.whitelisted || ['email_otp_required', 'password_login_required'].includes(result.identity.reason || ''))) return <Navigate to="/account-access" replace />;
 
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
-
-    if (!canSubmit) return;
-
-    const verifiedOtp = JSON.parse(localStorage.getItem('verifiedOtpAccount') || '{}') as { purpose?: string };
-    const result = changePasswordAfterOtp(newPassword);
-
-    if (!result.success) {
-      setError(result.error || 'Unable to update password. Please try again.');
-      return;
-    }
-
-    setError('');
-    navigate(verifiedOtp.purpose === 'passwordReset' ? '/login' : '/dashboard');
-  };
-
-  const renderPasswordInput = (
-    id: string,
-    value: string,
-    onChange: (value: string) => void,
-    showValue: boolean,
-    setShowValue: (value: boolean) => void,
-    placeholder: string,
-    hasError = false,
-  ) => (
-    <div className="relative">
-      <Input
-        id={id}
-        type={showValue ? 'text' : 'password'}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className={`h-10 rounded-lg bg-slate-50 px-3 pr-10 text-sm text-slate-950 placeholder:text-slate-400 focus-visible:ring-[#800000]/25 ${hasError ? 'border-[#b00000] shadow-[0_0_12px_rgba(176,0,0,0.18)] focus-visible:ring-[#b00000]' : 'border-[#d9e1ec]'}`}
-      />
-      <button
-        type="button"
-        onClick={() => setShowValue(!showValue)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-[#800000] focus:outline-none"
-      >
-        {showValue ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-      </button>
-    </div>
-  );
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      <BrandedHeader />
-      <div className="flex-1 flex items-center justify-center p-6">
-        <Card className="w-full max-w-[420px] rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <CardHeader className="text-center px-6 pt-7 pb-3 gap-1">
-            <CardTitle className="text-2xl font-bold leading-tight text-slate-900">Change Password</CardTitle>
-            <CardDescription className="text-xs text-slate-500">Update your password to secure your account.</CardDescription>
-          </CardHeader>
-          <CardContent className="px-6 pb-6">
-            {error && (
-              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 flex gap-2 text-xs text-red-700">
-                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="current-password" className="text-xs font-bold uppercase tracking-wider text-slate-500">Current Password</Label>
-                {renderPasswordInput(
-                  'current-password',
-                  currentPassword,
-                  setCurrentPassword,
-                  showCurrentPassword,
-                  setShowCurrentPassword,
-                  'Current password',
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="new-password" className="text-xs font-bold uppercase tracking-wider text-slate-500">New Password</Label>
-                {renderPasswordInput(
-                  'new-password',
-                  newPassword,
-                  setNewPassword,
-                  showPassword,
-                  setShowPassword,
-                  'Enter new password',
-                  Boolean(newPassword) && !ruleResults.every((rule) => rule.passed),
-                )}
-              </div>
-
-              <div className="rounded-lg border-0 bg-[#f6f7f9] px-3.5 py-2.5">
-                <p className="mb-1.5 text-[9px] font-bold uppercase tracking-[0.08em] text-[#20242c]">Password Requirements:</p>
-                <ul className="space-y-1 text-xs">
-                  {ruleResults.map((rule) => (
-                    <li key={rule.label} className={`flex items-center gap-1.5 ${rule.passed ? 'text-[#008a4b]' : 'text-[#f12b3d]'}`}>
-                      {rule.passed ? <CheckCircle2 className="h-3.5 w-3.5 fill-[#008a4b] text-white" /> : <XCircle className="h-3.5 w-3.5 fill-[#f12b3d] text-white" />}
-                      {rule.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {reusesDefaultPassword && (
-                <p className="text-xs text-red-700">New password cannot be the same as the default password.</p>
-              )}
-
-              <div className="space-y-1.5">
-                <Label htmlFor="confirm-password" className="text-xs font-bold uppercase tracking-wider text-slate-500">Confirm New Password</Label>
-                {renderPasswordInput('confirm-password', confirmPassword, setConfirmPassword, showConfirmPassword, setShowConfirmPassword, 'Confirm new password')}
-                {confirmPassword && !passwordsMatch && <p className="text-xs text-red-700">Passwords should match.</p>}
-              </div>
-
-              <Button
-                type="submit"
-                disabled={!canSubmit}
-                className="h-11 w-full rounded-lg bg-[#800000] hover:bg-[#6b0000] text-sm font-bold text-white shadow-sm cursor-pointer disabled:cursor-not-allowed disabled:bg-[#b55a5d] disabled:text-slate-200 transition-colors mt-2"
-              >
-                Update Password
-              </Button>
-            </form>
-
-            <div className="mt-5 border-t border-slate-200 pt-4 text-center">
-              <Link to="/login" className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-[#800000]">
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Cancel
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
+  return <PasswordChangePage ready={result.state === 'loaded'} onSubmit={async password => {
+    if (result.state !== 'loaded' || !('privacy' in result.identity)) throw new Error('Unable to check your account. Please retry.');
+    await completePasswordDecision(result.identity.privacy.currentVersion, 'change', password);
+    navigate('/account-access', { replace: true, state: location.state });
+  }} />;
 }

@@ -1,3 +1,4 @@
+import { toast } from 'sonner';
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -7,11 +8,11 @@ import { Badge } from '../../components/ui/badge';
 import { Search, Send, Paperclip, Plus } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
-const conversations = [
+const demoConversations = [
   {
     id: 1,
     name: 'Michael Chen',
-    role: 'Supervisor',
+    role: 'Adviser',
     lastMessage: 'Great work on the authentication module!',
     timestamp: '10:30 AM',
     unread: 2,
@@ -34,7 +35,7 @@ const conversations = [
   },
 ];
 
-const currentMessages = [
+const demoMessages = [
   {
     id: 1,
     sender: 'Michael Chen',
@@ -65,9 +66,12 @@ const currentMessages = [
   },
 ];
 
-export function Messages() {
+export function Messages({savedConversations,savedMessages}:{savedConversations?:typeof demoConversations;savedMessages?:typeof demoMessages}={}) {
+  const conversations=savedConversations??demoConversations;
+  const currentMessages=savedMessages??demoMessages;
+  const emptyConversation={id:0,name:'No conversations',role:'',lastMessage:'',timestamp:'',unread:0};
   const { user } = useAuth();
-  const [selectedConversation, setSelectedConversation] = useState(conversations[0]);
+  const [selectedConversation, setSelectedConversation] = useState(conversations[0]||emptyConversation);
   const [messageText, setMessageText] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -78,6 +82,7 @@ export function Messages() {
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (messageText.trim()) {
+      if(savedConversations){toast.error('Messaging is not connected on this page yet. No message was sent.');return;}
       // Mock send message
       setMessageText('');
     }
@@ -88,7 +93,7 @@ export function Messages() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold text-slate-900">Messages</h1>
-          <p className="text-slate-600 mt-1">Communicate with supervisors and students</p>
+          <p className="text-slate-600 mt-1">Communicate with advisers and students</p>
         </div>
         <Button className="bg-indigo-600 hover:bg-indigo-700 gap-2">
           <Plus className="h-4 w-4" />
@@ -115,7 +120,7 @@ export function Messages() {
           <CardContent className="p-0">
             <div className="divide-y divide-slate-200">
               {filteredConversations.map((conversation) => (
-                <div
+                <div data-interactive="true"
                   key={conversation.id}
                   onClick={() => setSelectedConversation(conversation)}
                   className={`p-4 cursor-pointer transition-colors ${

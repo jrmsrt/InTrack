@@ -1,3 +1,5 @@
+import { DocumentReviewWorkspace, NativeFilePreviewLink } from '../../components/forms/FileViewer';
+import type { UploadedDocument } from '../../lib/uploadedDocument';
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -218,10 +220,12 @@ function AnnouncementDialog() {
 
 function ReviewDialog({
   documentName,
+  file,
   disabled = false,
   onStatusChange,
 }: {
   documentName: string;
+  file?: UploadedDocument | null;
   disabled?: boolean;
   onStatusChange: (status: RequirementSubmissionStatus, remarks: string) => void;
 }) {
@@ -230,25 +234,17 @@ function ReviewDialog({
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2" disabled={disabled}>
+        <Button variant="outline" size="sm" className="gap-2" disabled={disabled || !file?.url}>
           <MessageSquare className="h-4 w-4" />
           Review
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-[min(96vw,1400px)] max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Review Document</DialogTitle>
           <DialogDescription>{documentName}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <p className="text-sm font-medium text-slate-900">Document preview</p>
-            <p className="text-sm text-slate-600 mt-1">Open the uploaded file before applying a review decision.</p>
-            <Button variant="outline" className="mt-3 gap-2">
-              <Eye className="h-4 w-4" />
-              Open uploaded file
-            </Button>
-          </div>
+        <DocumentReviewWorkspace file={file}>
           <div className="space-y-2">
             <Label htmlFor={`remarks-${documentName}`}>Remarks/comments</Label>
             <Textarea
@@ -258,7 +254,6 @@ function ReviewDialog({
               onChange={(event) => setRemarks(event.target.value)}
             />
           </div>
-        </div>
         <DialogFooter className="sm:justify-between">
           <Button
             variant="outline"
@@ -286,13 +281,14 @@ function ReviewDialog({
             </Button>
           </div>
         </DialogFooter>
+        </DocumentReviewWorkspace>
       </DialogContent>
     </Dialog>
   );
 }
 
 function RequirementReviewPanel() {
-  const [uploads, setUploads] = useState(coordinatorUploadQueue);
+  const [uploads, setUploads] = useState(coordinatorUploadQueue.map(upload => ({ ...upload, file: null as UploadedDocument | null })));
   const [studentFilter, setStudentFilter] = useState('All');
   const [sectionFilter, setSectionFilter] = useState('All');
   const [companyFilter, setCompanyFilter] = useState('All');
@@ -428,10 +424,7 @@ function RequirementReviewPanel() {
                   <TableCell>{upload.category}</TableCell>
                   <TableCell className="min-w-48 whitespace-normal">
                     {upload.fileName ? (
-                      <Button variant="ghost" size="sm" className="h-auto p-0 text-indigo-700 hover:bg-transparent hover:underline gap-1">
-                        <Eye className="h-4 w-4" />
-                        {upload.fileName}
-                      </Button>
+                      <NativeFilePreviewLink file={upload.file}>View</NativeFilePreviewLink>
                     ) : (
                       <span className="text-slate-500">Missing</span>
                     )}
@@ -440,13 +433,11 @@ function RequirementReviewPanel() {
                   <TableCell className="min-w-56 whitespace-normal text-slate-600">{upload.remarks}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" className="gap-2" disabled={!upload.fileName}>
-                        <Eye className="h-4 w-4" />
-                        View
-                      </Button>
+                      <NativeFilePreviewLink file={upload.file}>View</NativeFilePreviewLink>
                       <ReviewDialog
+                        file={upload.file}
                         documentName={`${upload.student} · ${upload.documentType}`}
-                        disabled={!upload.fileName}
+                        disabled={!upload.file?.url}
                         onStatusChange={(status, remarks) => updateReview(upload.id, status, remarks)}
                       />
                     </div>
@@ -591,7 +582,7 @@ export function FormsTemplatesManagement() {
                         <TableCell className="font-medium text-slate-900">{template.name}</TableCell>
                         <TableCell className="min-w-64 whitespace-normal text-slate-600">{template.description}</TableCell>
                         <TableCell>
-                          <a href={template.linkUrl} className="inline-flex items-center gap-1 text-indigo-700 hover:underline" target="_blank" rel="noreferrer">
+                          <a href={template.linkUrl} className="inline-flex items-center gap-1 text-indigo-700 hover:underline" target="_blank" rel="noopener noreferrer">
                             Placeholder
                             <ExternalLink className="h-3 w-3" />
                           </a>
@@ -660,3 +651,4 @@ export function FormsTemplatesManagement() {
     </div>
   );
 }
+

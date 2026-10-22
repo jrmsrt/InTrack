@@ -1,6 +1,7 @@
+import {useCoordinatorModuleData} from '../../context/CoordinatorModuleData';
 import React, { useState } from 'react';
-import { useOJT } from '../../context/OJTContext';
-import { useAuth } from '../../context/AuthContext';
+
+import {useCoordinatorIdentity} from '../../components/shared/CoordinatorPortal';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -28,8 +29,8 @@ import {
 } from '../../components/ui/dialog';
 
 export function Announcements() {
-  const { user } = useAuth();
-  const { announcements, addAnnouncement, deleteAnnouncement } = useOJT();
+  const identity=useCoordinatorIdentity(); const user={name:identity.profile.displayName};
+  const { announcements, addAnnouncement, deleteAnnouncement } = useCoordinatorModuleData();
   const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   // Form states
@@ -38,11 +39,12 @@ export function Announcements() {
   const [priority, setPriority] = useState<'Info' | 'Important' | 'Urgent'>('Info');
   const [targetRole, setTargetRole] = useState<'all' | 'student' | 'adviser'>('all');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    try {
     e.preventDefault();
     if (!title.trim() || !message.trim()) return;
 
-    addAnnouncement({
+    await addAnnouncement({
       title,
       message,
       priority,
@@ -56,11 +58,16 @@ export function Announcements() {
     setMessage('');
     setPriority('Info');
     setTargetRole('all');
+  
+    } catch(error) { toast.error(error instanceof Error?error.message:"Unable to save. Please retry."); }
   };
 
-  const handleDelete = (id: string) => {
-    deleteAnnouncement(id);
+  const handleDelete = async (id: string) => {
+    try {
+    await deleteAnnouncement(id);
     toast.success("Announcement deleted.");
+  
+    } catch(error) { toast.error(error instanceof Error?error.message:"Unable to save. Please retry."); }
   };
 
   const getPriorityBadge = (prio: string) => {
@@ -148,36 +155,43 @@ export function Announcements() {
           <CardDescription>Track all bulletins currently active on the platform dashboards.</CardDescription>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
-          <Table>
+          <Table className="min-w-[780px] table-fixed">
+            <colgroup>
+              <col className="w-[52%]" />
+              <col className="w-[13%]" />
+              <col className="w-[13%]" />
+              <col className="w-[16%]" />
+              <col className="w-[6%]" />
+            </colgroup>
             <TableHeader>
               <TableRow className="bg-slate-50/50">
                 <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase">Bulletin</TableHead>
-                <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase w-32">Priority</TableHead>
-                <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase w-32">Target Audience</TableHead>
+                <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase">Priority</TableHead>
+                <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase">Target Audience</TableHead>
                 <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase font-sans">Date Published</TableHead>
-                <TableHead className="py-3 px-4 font-semibold text-xs text-slate-500 uppercase text-center w-20">Actions</TableHead>
+                <TableHead className="py-3 px-3 font-semibold text-xs text-slate-500 uppercase text-center">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {announcements.map((ann) => (
                 <TableRow key={ann.id} className="hover:bg-slate-50/50 transition-colors">
-                  <TableCell className="py-3.5 px-4 font-sans max-w-sm">
-                    <span className="font-bold text-slate-805 text-xs block">{ann.title}</span>
-                    <p className="text-[11px] text-slate-500 font-light mt-0.5 leading-normal">{ann.message}</p>
+                  <TableCell className="py-3.5 px-4 font-sans align-top">
+                    <span title={ann.title} className="block truncate font-bold text-slate-805 text-xs">{ann.title}</span>
+                    <p title={ann.message} className="mt-0.5 overflow-hidden text-[11px] font-light leading-normal text-slate-500 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{ann.message}</p>
                   </TableCell>
-                  <TableCell className="py-3.5 px-4">
-                    {getPriorityBadge(ann.priority)}
+                  <TableCell className="py-3.5 px-4 align-top">
+                    {ann.priority==='Not recorded'?<Badge>Not recorded</Badge>:getPriorityBadge(ann.priority)}
                   </TableCell>
-                  <TableCell className="py-3.5 px-4 text-xs font-semibold text-slate-650 capitalize">
+                  <TableCell className="py-3.5 px-4 align-top text-xs font-semibold text-slate-650 capitalize whitespace-nowrap">
                     {ann.targetRole}
                   </TableCell>
-                  <TableCell className="py-3.5 px-4 font-semibold text-xs text-slate-450 font-sans">
-                    <span className="flex items-center gap-1">
+                  <TableCell className="py-3.5 px-4 align-top font-semibold text-xs text-slate-450 font-sans whitespace-nowrap">
+                    <span className="flex items-center gap-1 whitespace-nowrap">
                       <Calendar className="h-3.5 w-3.5" />
                       {ann.publishDate}
                     </span>
                   </TableCell>
-                  <TableCell className="py-3.5 px-4 text-center">
+                  <TableCell className="py-3.5 px-3 align-top text-center">
                     <Button
                       variant="ghost"
                       size="icon"

@@ -1,10 +1,13 @@
+import { NativeFilePreviewLink } from '../../components/forms/FileViewer';
 import React, { useState } from 'react';
 import { useOJT, StudentOJTProfile } from '../../context/OJTContext';
+import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
-import { RequirementFilePreviewDialog, RequirementFilePreview } from '../../components/forms/RequirementFilePreviewDialog';
+import { RequirementFilePreview, openNativeDocument, resolveRequirementDocument } from '../../components/forms/requirementFiles';
+import { MasterlistImportDialog, MasterlistStudent } from '../../components/forms/MasterlistImportDialog';
 import {
   Table,
   TableBody,
@@ -20,7 +23,8 @@ import {
   Clock, 
   AlertTriangle,
   FileText,
-  UserCheck
+  UserCheck,
+  FileSpreadsheet,
 } from 'lucide-react';
 import {
   Dialog,
@@ -55,14 +59,29 @@ function formatLastFirstMI(fullName: string): string {
 }
 
 export function StudentMonitoring() {
-  const { students } = useOJT();
+  const { students, addStudentProfile, isBackendConnected } = useOJT();
+  const { user, authorizeStudent } = useAuth();
   
   const [searchTerm, setSearchTerm] = useState('');
   const [sectionFilter, setSectionFilter] = useState('all');
   const [programFilter, setProgramFilter] = useState('all');
   
   const [selectedStudent, setSelectedStudent] = useState<StudentOJTProfile | null>(null);
-  const [previewReq, setPreviewReq] = useState<RequirementFilePreview | null>(null);
+  
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+  const handleImportMasterlist = (records: MasterlistStudent[]) => {
+    let imported = 0;
+    let skipped = 0;
+    records.forEach(record => {
+      if (students.some(student => student.studentNumber.toLowerCase() === record.studentNumber.toLowerCase())) { skipped += 1; return; }
+      const whitelistResult = authorizeStudent(record);
+      if (!whitelistResult.success) { skipped += 1; return; }
+      addStudentProfile({ studentId: `student-${record.studentNumber}`, studentNumber: record.studentNumber, name: record.name, email: record.email, program: record.program, section: record.section, adviserId: user?.id || 'adviser_temp', adviserName: user?.name || 'Assigned Adviser', companyId: 'c1', companyName: 'TechCorp Inc.' });
+      imported += 1;
+    });
+    return { imported, skipped };
+  };
 
   const getComparableSection = (section: string) => {
     const normalizedSection = section.trim().toUpperCase();
@@ -115,20 +134,14 @@ export function StudentMonitoring() {
       <div className="min-w-0">
         <span className="font-medium text-slate-700 truncate max-w-[180px] block">{requirement.name}</span>
         {requirement.fileName && (
-          <button
-            type="button"
-            title="Click to preview file"
-            onClick={() => setPreviewReq({
+          <NativeFilePreviewLink file={resolveRequirementDocument(students, {
               studentName: student.name,
               reqName: requirement.name,
               fileName: requirement.fileName || '',
               stage
-            })}
-            className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-[#800000] hover:underline underline-offset-2 max-w-[190px] cursor-pointer"
-          >
-            <FileText className="h-3 w-3 shrink-0" />
+            })}>
             <span className="truncate">{requirement.fileName}</span>
-          </button>
+          </NativeFilePreviewLink>
         )}
       </div>
       <div className="shrink-0">{getStatusBadge(requirement.status)}</div>
@@ -137,10 +150,15 @@ export function StudentMonitoring() {
 
   return (
     <div className="space-y-6 font-sans">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Student Monitoring Module</h1>
-        <p className="text-slate-500 text-sm mt-0.5">Track OJT progression and clearances for all students under your advisory.</p>
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Student Monitoring Module</h1>
+          <p className="text-slate-500 text-sm mt-0.5">Track OJT progression and clearances for all students under your advisory.</p>
+        </div>
+        <Button disabled={isBackendConnected} title={isBackendConnected?'Whitelisting is managed by the coordinator. Enroll students through My Classes.':undefined} onClick={() => setImportDialogOpen(true)} className="h-9 gap-1.5 bg-[#800000] text-xs font-bold hover:bg-[#6b0000]"><FileSpreadsheet className="h-4 w-4" /> Import & whitelist</Button>
       </div>
+
+      <MasterlistImportDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} onImport={handleImportMasterlist} title="Import Advisee Masterlist" />
 
       {/* Filter panel */}
       <Card className="shadow-sm border-slate-200">
@@ -228,7 +246,7 @@ export function StudentMonitoring() {
                   const postCountApproved = s.postOJTRequirements.filter(r => r.status === 'Approved').length;
 
                   return (
-                    <TableRow 
+                    <TableRow data-interactive="true" 
                       key={s.studentId}
                       onClick={() => setSelectedStudent(s)}
                       className="hover:bg-slate-50/50 transition-colors cursor-pointer"
@@ -260,7 +278,7 @@ export function StudentMonitoring() {
                       </TableCell>
                       <TableCell className="py-3.5 px-4 text-center">
                         {s.portfolioApproved ? (
-                          <Badge className="bg-green-100 text-green-800">Approved</Badge>
+                          <Badge className="bg-green-100 text-green-800">Endorsed</Badge>
                         ) : s.portfolioSubmitted ? (
                           <Badge className="bg-blue-100 text-blue-800">Review</Badge>
                         ) : (
@@ -299,20 +317,14 @@ export function StudentMonitoring() {
                     <div className="min-w-0">
                       <span className="font-medium text-slate-700 block">Memorandum of Agreement</span>
                       {selectedStudent.moaState.fileName && (
-                        <button
-                          type="button"
-                          title="Click to preview file"
-                          onClick={() => setPreviewReq({
+                        <NativeFilePreviewLink file={resolveRequirementDocument(students, {
                             studentName: selectedStudent.name,
                             reqName: 'Memorandum of Agreement',
                             fileName: selectedStudent.moaState.fileName || '',
                             stage: 'MOA'
-                          })}
-                          className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-[#800000] hover:underline underline-offset-2 max-w-[190px] cursor-pointer"
-                        >
-                          <FileText className="h-3 w-3 shrink-0" />
+                          })}>
                           <span className="truncate">{selectedStudent.moaState.fileName}</span>
-                        </button>
+                        </NativeFilePreviewLink>
                       )}
                     </div>
                     {getStatusBadge(selectedStudent.moaState.status)}
@@ -344,12 +356,7 @@ export function StudentMonitoring() {
         </Dialog>
       )}
 
-      <RequirementFilePreviewDialog
-        preview={previewReq}
-        onOpenChange={(open) => {
-          if (!open) setPreviewReq(null);
-        }}
-      />
+      
     </div>
   );
 }

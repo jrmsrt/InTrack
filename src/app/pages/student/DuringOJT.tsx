@@ -1,4 +1,8 @@
+import { portfolioTemplateTitle } from '../../domain/portfolioContents';
+import { NativeFilePreviewLink } from '../../components/forms/FileViewer';
+import { readUploadedDocument } from '../../lib/uploadedDocument';
 import React, { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useOJT } from '../../context/OJTContext';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
@@ -30,8 +34,11 @@ import { Label } from '../../components/ui/label';
 
 export function DuringOJT() {
   const { user } = useAuth();
-  const { students, uploadDuringOJTReq } = useOJT();
+  const navigate = useNavigate();
+  const { students, uploadDuringOJTReq, isBackendConnected, uploadRequirementFile, submitPhysicalRequirement } = useOJT();
   
+  const [isUploading, setIsUploading] = useState(false);
+  const uploadingRef = useRef(false);
   const [selectedReq, setSelectedReq] = useState<string | null>(null);
   const [formattedFileName, setFormattedFileName] = useState('');
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -42,10 +49,10 @@ export function DuringOJT() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Keep track of actual uploaded file references & object URLs for dynamic preview
-  const [uploadedFiles, setUploadedFiles] = useState<Record<string, { file: File; url: string }>>({});
+  
 
   // File Preview state
-  const [previewReq, setPreviewReq] = useState<{ reqName: string; fileName: string } | null>(null);
+  
 
   const student = students.find(s => s.studentId === user?.id || s.email === user?.email);
 
@@ -57,6 +64,10 @@ export function DuringOJT() {
       </div>
     );
   }
+
+  const dtrPeriods = Array.from(new Set(student.dtrHistory.map(dtr => dtr.month)));
+  const approvedDtrs = student.dtrHistory.filter(dtr => dtr.status === 'Approved').length;
+  const pendingDtrs = student.dtrHistory.filter(dtr => dtr.status === 'Submitted' || dtr.status === 'Under Review').length;
 
   const isCleared = student.stage !== 'Stage 1: Pre-OJT';
 
@@ -133,7 +144,7 @@ export function DuringOJT() {
     originalFileName: string
   ) => {
     const nameParts = studentName.trim().split(/\s+/);
-    const lastName = nameParts[nameParts.length - 1] || 'Student';
+    const lastName = studentName.includes(',') ? studentName.split(',')[0].trim() : nameParts[nameParts.length - 1] || 'Student';
 
     let course = 'Course';
     if (program) {
@@ -230,22 +241,27 @@ export function DuringOJT() {
   };
 
   // Submit handlers
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedReq || !selectedFile || !formattedFileName.trim()) return;
 
-    const objectUrl = URL.createObjectURL(selectedFile);
-    setUploadedFiles(prev => ({
-      ...prev,
-      [selectedReq]: { file: selectedFile, url: objectUrl }
-    }));
-
-    uploadDuringOJTReq(student.studentId, selectedReq, formattedFileName);
-    toast.success(`Successfully uploaded document: ${formattedFileName}`, {
-      description: `Requirement: ${selectedReq} is now marked as Under Review.`
-    });
-    
-    resetUploadState();
+    if (uploadingRef.current) return;
+    uploadingRef.current = true; setIsUploading(true);
+    try {
+      if (isBackendConnected) {
+        if (!uploadRequirementFile) throw new Error('Upload service unavailable. Please refresh.');
+        await uploadRequirementFile('during', selectedReq, new File([selectedFile], formattedFileName, {type:selectedFile.type || 'application/pdf'}));
+      } else {
+        const uploadedDocument = await readUploadedDocument(selectedFile, formattedFileName);
+        await uploadDuringOJTReq(student.studentId, selectedReq, formattedFileName, uploadedDocument);
+      }
+      toast.success(`Successfully uploaded document: ${formattedFileName}`, {
+        description: 'Your submission is saved and awaiting review.'
+      });
+      resetUploadState();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Upload failed. Please retry with the same file.');
+    } finally { uploadingRef.current = false; setIsUploading(false); }
   };
 
   const openUploadModal = (reqName: string) => {
@@ -270,249 +286,7 @@ export function DuringOJT() {
   };
 
   // Preview renderer for the documents modal
-  const renderPreviewContent = (reqName: string, fileName: string) => {
-    const studentName = student.name;
-    const studentNo = student.studentNumber;
-    const course = student.program.split(/[—–-]/)[0]?.trim() || 'BSIT';
-
-    const actualUpload = uploadedFiles[reqName];
-    if (actualUpload) {
-      const { file, url } = actualUpload;
-      const isImage = file.type.startsWith('image/') || /\.(jpg|jpeg|png|gif|svg)$/i.test(file.name);
-      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
-
-      if (isImage) {
-        return (
-          <div className="flex flex-col items-center justify-center bg-slate-50 border border-slate-200 rounded-lg p-4 min-h-[380px]">
-            <img 
-              src={url} 
-              alt={reqName} 
-              className="max-w-full max-h-[60vh] object-contain rounded shadow border" 
-            />
-            <p className="text-[10px] text-slate-400 font-mono mt-3">Image Preview: {file.name} ({ (file.size / 1024).toFixed(1) } KB)</p>
-          </div>
-        );
-      } else if (isPdf) {
-        return (
-          <div className="bg-slate-50 border border-slate-200 rounded-lg p-1 min-h-[380px]">
-            <iframe 
-              src={url} 
-              title={reqName} 
-              className="w-full h-[60vh] rounded border shadow-inner" 
-            />
-            <p className="text-[10px] text-slate-400 font-mono mt-2 text-center">PDF Preview: {file.name} ({ (file.size / 1024 / 1024).toFixed(2) } MB)</p>
-          </div>
-        );
-      } else {
-        return (
-          <div className="flex flex-col items-center justify-center bg-slate-50 border border-slate-200 rounded-lg p-8 min-h-[380px] text-center">
-            <FileText className="h-16 w-16 text-[#800000] mb-4 animate-bounce" />
-            <h4 className="font-bold text-slate-800 text-sm uppercase">{reqName}</h4>
-            <p className="text-slate-500 text-xs mt-1.5 max-w-sm leading-relaxed mx-auto">
-              This file type <strong>({file.name.split('.').pop()?.toUpperCase()})</strong> cannot be viewed directly in the browser.
-            </p>
-            <div className="mt-6 flex flex-col gap-2 w-full max-w-xs mx-auto">
-              <a 
-                href={url} 
-                download={fileName} 
-                className="w-full bg-[#800000] hover:bg-[#6b0000] text-white text-xs font-semibold py-2 px-4 rounded text-center transition-colors shadow flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Upload className="h-3.5 w-3.5 rotate-180" />
-                Download Uploaded File
-              </a>
-              <span className="text-[9px] text-slate-450 font-mono truncate text-center">Original: {file.name}</span>
-            </div>
-          </div>
-        );
-      }
-    }
-
-    if (reqName === 'Daily Time Record') {
-      return (
-        <div className="border border-slate-300 rounded-lg p-6 bg-white font-sans text-[11px] text-slate-800 shadow-inner relative overflow-hidden" style={{ minHeight: '380px' }}>
-          <div className="text-center border-b pb-2 mb-4">
-            <h3 className="font-bold text-[11px] uppercase text-slate-900 leading-tight">{student.companyName || 'Host Training Establishment'}</h3>
-            <p className="text-slate-500 text-[9px] mt-0.5">DAILY TIME RECORD (DTR)</p>
-            <p className="font-bold text-[#800000] mt-1 text-[10px]">PUNCH LOG CLEARANCE SHEET</p>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-y-1.5 mb-4 text-[10px] bg-slate-50 p-2.5 rounded border border-slate-100">
-            <div><span className="font-semibold text-slate-505 text-slate-500">Intern Name:</span> {studentName}</div>
-            <div><span className="font-semibold text-slate-505 text-slate-500">Student ID:</span> {studentNo}</div>
-            <div><span className="font-semibold text-slate-505 text-slate-500">Department:</span> Engineering / Development</div>
-            <div><span className="font-semibold text-slate-505 text-slate-500">Required Hours:</span> {student.requiredHours} hrs</div>
-          </div>
-
-          <div className="border rounded overflow-hidden">
-            <div className="bg-slate-50 font-bold border-b py-1 px-2 grid grid-cols-5 text-[9px] text-slate-500 text-center">
-              <span>Date</span>
-              <span>Time In</span>
-              <span>Time Out</span>
-              <span>Hours</span>
-              <span>Status</span>
-            </div>
-            <div className="divide-y text-[9px] text-slate-650 text-slate-600 text-center">
-              <div className="py-1.5 px-2 grid grid-cols-5">
-                <span>2026-06-15</span>
-                <span>08:00 AM</span>
-                <span>05:00 PM</span>
-                <span>8.0</span>
-                <span className="text-green-600 font-bold">Approved</span>
-              </div>
-              <div className="py-1.5 px-2 grid grid-cols-5">
-                <span>2026-06-16</span>
-                <span>07:55 AM</span>
-                <span>05:05 PM</span>
-                <span>8.0</span>
-                <span className="text-green-600 font-bold">Approved</span>
-              </div>
-              <div className="py-1.5 px-2 grid grid-cols-5">
-                <span>2026-06-17</span>
-                <span>08:02 AM</span>
-                <span>05:00 PM</span>
-                <span>8.0</span>
-                <span className="text-green-650 text-green-650 text-green-600 font-bold">Approved</span>
-              </div>
-              <div className="py-1.5 px-2 grid grid-cols-5">
-                <span>2026-06-18</span>
-                <span>08:00 AM</span>
-                <span>05:00 PM</span>
-                <span>8.0</span>
-                <span className="text-green-650 text-green-650 text-green-600 font-bold">Approved</span>
-              </div>
-              <div className="py-1.5 px-2 grid grid-cols-5">
-                <span>2026-06-19</span>
-                <span>07:58 AM</span>
-                <span>05:02 PM</span>
-                <span>8.0</span>
-                <span className="text-green-650 text-green-650 text-green-600 font-bold">Approved</span>
-              </div>
-            </div>
-          </div>
-          <div className="flex justify-between items-center text-[8px] text-slate-400 mt-12 border-t pt-2">
-            <span>Verified by: {student.adviserName || 'Michael Chen'}</span>
-            <span className="font-mono">{fileName}</span>
-          </div>
-        </div>
-      );
-    }
-
-    if (reqName === 'Self-Reflection') {
-      return (
-        <div className="border border-slate-300 rounded-lg p-6 bg-white font-sans text-slate-800 shadow-inner min-h-[380px] relative overflow-hidden">
-          <div className="text-center border-b pb-4 mb-4">
-            <h3 className="font-bold text-sm text-slate-900 tracking-tight leading-none">{studentName}</h3>
-            <p className="text-[#800000] text-xs font-semibold mt-1">Narrative Self-Reflection Report</p>
-            <p className="text-[9px] text-slate-400 font-light mt-0.5">{student.program}</p>
-          </div>
-          <div className="space-y-3 text-[11px] leading-relaxed text-slate-700">
-            <p>
-              <strong>My Learning Experience:</strong> Over the course of this internship at {student.companyName || 'my host company'}, I had the opportunity to apply theoretical classroom concepts to industry-level projects. Adapting to the engineering practices, strict version control guidelines, and daily stand-ups taught me how software teams collaborate effectively.
-            </p>
-            <p>
-              <strong>Challenges Overcome:</strong> Initially, managing the scale of the repository and database tables was overwhelming. Through the guidance of my industrial supervisor and consistent research, I learned how to modularize my code and optimize complex queries.
-            </p>
-            <p>
-              <strong>Career Aspirations:</strong> This deployment solidified my desire to pursue a career in software development, specifically focusing on building scalable web interfaces and robust APIs.
-            </p>
-          </div>
-          <div className="mt-12 pt-4 border-t border-slate-200 flex justify-between items-center text-[8px] text-slate-400">
-            <span>Date Submitted: 2026-06-24</span>
-            <span className="font-mono">{fileName}</span>
-          </div>
-        </div>
-      );
-    }
-
-    if (reqName.startsWith('Weekly Journal (Week')) {
-      const weekNum = reqName.match(/\d+/)?.[0] || '1';
-      return (
-        <div className="border border-slate-300 rounded-lg p-6 bg-white font-sans text-slate-800 shadow-inner min-h-[380px]">
-          <div className="flex justify-between items-center border-b pb-3 mb-4">
-            <div>
-              <h3 className="font-bold text-xs text-slate-900">WEEKLY JOURNAL REPORT</h3>
-              <p className="text-[#800000] text-[10px] font-bold mt-0.5">Week {weekNum}</p>
-            </div>
-            <span className="text-[10px] bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-500 font-medium">Stage 2: During-OJT</span>
-          </div>
-          
-          <div className="space-y-4 text-[10.5px]">
-            <div>
-              <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[9px] text-[#800000]">1. Key Tasks Accomplished</h4>
-              <p className="text-slate-600 mt-1 leading-relaxed pl-2 border-l border-slate-200">
-                Participated in daily scrum stand-ups. Completed module integration code, solved minor layout bugs on front-end components, and drafted unit tests for backend APIs.
-              </p>
-            </div>
-            <div>
-              <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[9px] text-[#800000]">2. Learning & Skills Applied</h4>
-              <p className="text-slate-650 mt-1 leading-relaxed pl-2 border-l border-slate-200">
-                Practiced Git branch rebasing workflow. Enhanced understanding of RESTful API request validations and responsive flex-box styling rules.
-              </p>
-            </div>
-            <div>
-              <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[9px] text-[#800000]">3. Problems Encountered & Resolutions</h4>
-              <p className="text-slate-650 mt-1 leading-relaxed pl-2 border-l border-slate-200">
-                Encountered merge conflicts during repository sync. Solved it by pair programming with the team lead and executing precise line-by-line staging.
-              </p>
-            </div>
-          </div>
-          <div className="mt-10 pt-4 border-t border-slate-150 flex justify-between items-center text-[8px] text-slate-400">
-            <span>Authorized Sign-off: Supervisor Verified</span>
-            <span className="font-mono">{fileName}</span>
-          </div>
-        </div>
-      );
-    }
-
-    if (reqName.startsWith('Pictures / Documentation (Week')) {
-      const weekNum = reqName.match(/\d+/)?.[0] || '1';
-      return (
-        <div className="border border-slate-300 rounded-lg p-5 bg-white font-sans text-slate-800 shadow-inner min-h-[380px] flex flex-col justify-between">
-          <div>
-            <div className="flex justify-between items-center border-b pb-2 mb-4">
-              <div>
-                <h3 className="font-bold text-xs text-slate-900">PHOTO DOCUMENTATION</h3>
-                <p className="text-[#800000] text-[10px] font-bold mt-0.5">Week {weekNum}</p>
-              </div>
-              <span className="text-[10px] text-slate-400 font-mono">Attachment Verified</span>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-3 mt-3">
-              <div className="border rounded bg-slate-50 p-2 text-center flex flex-col items-center justify-center min-h-[140px] border-dashed">
-                <div className="bg-slate-200 h-10 w-10 rounded-full flex items-center justify-center text-slate-500 mb-2">
-                  <Camera className="h-5 w-5" />
-                </div>
-                <span className="text-[9px] font-bold text-slate-600 block uppercase">Workspace Photo</span>
-                <span className="text-[8px] text-slate-400 mt-1 font-mono">office_desk_w{weekNum}.jpg</span>
-              </div>
-              <div className="border rounded bg-slate-50 p-2 text-center flex flex-col items-center justify-center min-h-[140px] border-dashed">
-                <div className="bg-slate-200 h-10 w-10 rounded-full flex items-center justify-center text-slate-500 mb-2">
-                  <Camera className="h-5 w-5" />
-                </div>
-                <span className="text-[9px] font-bold text-slate-600 block uppercase">Task Output Screen</span>
-                <span className="text-[8px] text-slate-400 mt-1 font-mono">ui_screenshot_w{weekNum}.jpg</span>
-              </div>
-            </div>
-          </div>
-          
-          <div className="mt-8 pt-3 border-t border-slate-200 flex justify-between items-center text-[8px] text-slate-400">
-            <span>Timestamp: 2026-06-24</span>
-            <span className="font-mono">{fileName}</span>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex flex-col items-center justify-center bg-slate-50 border border-slate-200 rounded-lg p-8 min-h-[380px] text-center">
-        <FileText className="h-16 w-16 text-[#800000] mb-4 animate-bounce" />
-        <h4 className="font-bold text-slate-800 text-sm uppercase">{reqName}</h4>
-        <p className="text-slate-500 text-xs mt-1.5 max-w-sm leading-relaxed mx-auto">
-          Mock preview representation of your uploaded document clearance.
-        </p>
-      </div>
-    );
-  };
+  
 
   return (
     <div className="space-y-6">
@@ -523,8 +297,8 @@ export function DuringOJT() {
         </div>
       </div>
 
-      <Card className="shadow-sm border-slate-200 -mt-3.5">
-        <CardHeader className="pb-3 border-b border-slate-100">
+      <Card className="requirement-checklist gap-0 shadow-sm border-slate-200 -mt-3.5">
+        <CardHeader className="!pt-5 !pb-4 border-b border-slate-100">
           <div className="flex justify-between items-center">
             <div>
               <CardTitle className="text-base font-bold text-slate-800">Deployment Deliverables</CardTitle>
@@ -536,7 +310,7 @@ export function DuringOJT() {
           </div>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
-          <table className="w-full text-left text-sm border-collapse">
+          <table className="intrack-table w-full min-w-[760px] table-fixed text-left text-sm border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold text-xs uppercase tracking-wider">
                 <th className="py-4 pl-12 pr-6 font-semibold">Requirement Description</th>
@@ -555,19 +329,14 @@ export function DuringOJT() {
                     <span className="font-semibold text-slate-800 block">
                       {idx + 1}. {req.name}
                     </span>
-                    <span className="text-[10px] text-slate-400 font-medium">{getReqDescription(req.name)}</span>
+                    <span className="requirement-description whitespace-pre-line text-[10px] text-slate-400 font-medium">{req.description || getReqDescription(req.name)}</span>
                   </td>
                   <td className="py-5.5 px-6">
-                    {req.fileName ? (
+                    {req.name === 'Daily Time Record' ? (
+                      <div className="flex flex-wrap items-center gap-2"><div className="text-xs text-slate-600"><span className="font-bold text-slate-800">{approvedDtrs} approved</span> · {pendingDtrs} pending review · {dtrPeriods.length} generated period{dtrPeriods.length === 1 ? '' : 's'}</div><Button variant="outline" size="sm" className="h-8 cursor-pointer border-slate-200 text-xs hover:bg-slate-100" onClick={() => navigate('/attendance')}><FileText className="h-3.5 w-3.5" />View DTR</Button></div>
+                    ) : req.file?.url ? (
                       <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-slate-400 shrink-0" />
-                        <span 
-                          className="text-xs font-semibold text-slate-600 max-w-[180px] truncate hover:text-[#800000] hover:underline cursor-pointer flex items-center gap-1 transition-colors"
-                          title="Click to preview file"
-                          onClick={() => setPreviewReq({ reqName: req.name, fileName: req.fileName || '' })}
-                        >
-                          {req.fileName}
-                        </span>
+                        <NativeFilePreviewLink file={req.file}>{req.fileName || req.file.name}</NativeFilePreviewLink>
                         {req.status !== 'Approved' && (
                           <Button 
                             variant="ghost" 
@@ -592,10 +361,10 @@ export function DuringOJT() {
                     )}
                   </td>
                   <td className="py-5.5 px-6 font-semibold">
-                    {getStatusBadge(req.status)}
+                    {req.name === 'Daily Time Record' ? <Badge className={approvedDtrs > 0 ? 'bg-green-100 text-green-800' : pendingDtrs > 0 ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}>{approvedDtrs > 0 ? 'DTR progress' : pendingDtrs > 0 ? 'Pending review' : 'No DTR submitted'}</Badge> : getStatusBadge(req.status)}
                   </td>
                   <td className="py-5.5 px-6 text-xs text-slate-500 max-w-xs leading-relaxed font-light">
-                    {req.remarks ? req.remarks : '—'}
+                    {req.name === 'Daily Time Record' ? 'Generate and submit each reporting period from Attendance & DTR. No file upload is required here.' : req.remarks ? req.remarks : '—'}
                   </td>
                 </tr>
               ))}
@@ -606,13 +375,13 @@ export function DuringOJT() {
 
       {/* SINGLE DIALOG FOR FILE UPLOAD */}
       <Dialog open={uploadDialogOpen} onOpenChange={(open) => {
-        if (!open) resetUploadState();
+        if (!open && !uploadingRef.current) resetUploadState();
       }}>
         <DialogContent className="sm:max-w-md">
           <form onSubmit={handleUploadSubmit}>
             <DialogHeader>
               <DialogTitle className="text-slate-900 font-sans font-bold">
-                {selectedReq && student.duringOJTRequirements.find(r => r.name === selectedReq)?.fileName 
+                {selectedReq && student.duringOJTRequirements.find(r => r.name === selectedReq)?.file?.url
                   ? 'Re-upload Document' 
                   : 'Upload OJT Document'}
               </DialogTitle>
@@ -622,7 +391,7 @@ export function DuringOJT() {
             </DialogHeader>
             <div className="py-4 space-y-4">
               {/* DRAG AND DROP ZONE */}
-              <div 
+              <div data-interactive="true" 
                 className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
                   dragActive 
                     ? "border-[#800000] bg-red-50/30" 
@@ -674,13 +443,13 @@ export function DuringOJT() {
               )}
             </div>
             <DialogFooter className="gap-2 sm:gap-0">
-              <Button type="button" variant="outline" onClick={resetUploadState} className="text-xs hover:bg-slate-100 hover:text-slate-900 border-slate-200 cursor-pointer transition-colors">
+              <Button type="button" variant="outline" onClick={resetUploadState} disabled={isUploading} className="text-xs hover:bg-slate-100 hover:text-slate-900 border-slate-200 cursor-pointer transition-colors">
                 Cancel
               </Button>
               <Button 
                 type="submit" 
                 className="bg-[#800000] hover:bg-[#6b0000] text-white text-xs font-semibold cursor-pointer transition-colors shadow-sm"
-                disabled={!selectedFile || !formattedFileName.trim()}
+                disabled={isUploading || !selectedFile || !formattedFileName.trim()}
               >
                 Upload File
               </Button>
@@ -690,31 +459,7 @@ export function DuringOJT() {
       </Dialog>
 
       {/* DYNAMIC DOCUMENT PREVIEW DIALOG */}
-      <Dialog open={!!previewReq} onOpenChange={(open) => {
-        if (!open) setPreviewReq(null);
-      }}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto font-sans">
-          <DialogHeader className="border-b pb-2 mb-2">
-            <DialogTitle className="text-slate-900 font-sans font-bold flex items-center gap-2">
-              <FileCheck className="h-5 w-5 text-[#800000]" />
-              Document Preview
-            </DialogTitle>
-            <DialogDescription className="text-slate-500 font-light text-xs truncate">
-              Previewing: <span className="font-mono text-slate-700 font-semibold">{previewReq?.fileName}</span>
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="py-2 bg-slate-100 rounded-lg p-3 border border-slate-200">
-            {previewReq && renderPreviewContent(previewReq.reqName, previewReq.fileName)}
-          </div>
-          
-          <DialogFooter className="border-t pt-3 mt-2">
-            <Button type="button" onClick={() => setPreviewReq(null)} className="bg-[#800000] hover:bg-[#6b0000] text-white text-xs font-semibold px-4 cursor-pointer transition-colors">
-              Close Preview
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      
     </div>
   );
 }

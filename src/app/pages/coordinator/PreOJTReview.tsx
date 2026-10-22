@@ -1,3 +1,4 @@
+import { DocumentReviewWorkspace, NativeFilePreviewLink } from '../../components/forms/FileViewer';
 import React, { useState } from 'react';
 import { useOJT } from '../../context/OJTContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
@@ -61,7 +62,7 @@ export function PreOJTReview() {
   );
 
   const handleReviewAction = (status: 'Approved' | 'Needs Revision' | 'Rejected') => {
-    if (!selectedReq) return;
+    if (!selectedReq || !(students.find(s => s.studentId === selectedReq?.studentId)?.preOJTRequirements.find(r => r.name === selectedReq?.reqName)?.file?.url || ['Practicum kit (expanded envelope)', 'Attendance OJT Orientation'].includes(selectedReq?.reqName || ''))) return;
 
     reviewPreOJTReq(selectedReq.studentId, selectedReq.reqName, status, remarks);
     toast.success(`Pre-OJT requirement ${selectedReq.reqName} is now marked ${status}`);
@@ -123,8 +124,9 @@ export function PreOJTReview() {
                     </TableCell>
                     <TableCell className="py-3.5 px-4 text-xs font-semibold text-slate-600">
                       <div className="flex items-center gap-1.5">
-                        <FileText className="h-4 w-4 text-[#800000] shrink-0" />
-                        <span className="truncate max-w-[160px]">{r.fileName}</span>
+                        <NativeFilePreviewLink file={students.find(s => s.studentId === r.studentId)?.preOJTRequirements.find(req => req.name === r.reqName)?.file}>
+                          {r.fileName}
+                        </NativeFilePreviewLink>
                       </div>
                     </TableCell>
                     <TableCell className="py-3.5 px-4">
@@ -158,21 +160,23 @@ export function PreOJTReview() {
       {/* Review Dialog */}
       {selectedReq && (
         <Dialog open={reviewDialogOpen} onOpenChange={() => setReviewDialogOpen(false)}>
-          <DialogContent className="sm:max-w-md font-sans">
+          <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[min(96vw,1400px)] max-h-[92vh] overflow-y-auto font-sans">
             <DialogHeader>
               <DialogTitle>Audit Pre-OJT Intake File</DialogTitle>
               <DialogDescription>
                 Auditing <span className="font-semibold text-slate-800">{selectedReq.reqName}</span> submitted by {selectedReq.studentName}.
               </DialogDescription>
             </DialogHeader>
+<DocumentReviewWorkspace file={students.find(s => s.studentId === selectedReq.studentId)?.preOJTRequirements.find(r => r.name === selectedReq.reqName)?.file}>
 
             <div className="py-4 space-y-4 text-xs">
               <div className="p-3 bg-slate-50 rounded border flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-[#800000]" />
                   <div>
-                    <p className="font-bold text-slate-800 text-[11px] truncate max-w-[180px]">{selectedReq.fileName}</p>
-                    <p className="text-[10px] text-slate-400 font-medium">Verified scanned file copy</p>
+                    <NativeFilePreviewLink file={students.find(s => s.studentId === selectedReq.studentId)?.preOJTRequirements.find(r => r.name === selectedReq.reqName)?.file}>
+                      {selectedReq.fileName}
+                    </NativeFilePreviewLink>
+                    <p className="text-[10px] text-slate-400 font-medium">Submission record</p>
                   </div>
                 </div>
               </div>
@@ -190,20 +194,21 @@ export function PreOJTReview() {
 
             <DialogFooter className="gap-2 sm:gap-0">
               <Button
-                variant="outline"
-                onClick={() => handleReviewAction('Needs Revision')}
-                className="text-xs border-amber-305 text-amber-800 hover:bg-amber-50 cursor-pointer"
+                variant="secondary"
+                disabled={!(students.find(s => s.studentId === selectedReq?.studentId)?.preOJTRequirements.find(r => r.name === selectedReq?.reqName)?.file?.url || ['Practicum kit (expanded envelope)', 'Attendance OJT Orientation'].includes(selectedReq?.reqName || ''))} onClick={() => handleReviewAction('Needs Revision')}
+                className="text-xs cursor-pointer"
               >
                 <X className="h-3.5 w-3.5 mr-1" /> Request Revision
               </Button>
               <Button
-                onClick={() => handleReviewAction('Approved')}
+                disabled={!(students.find(s => s.studentId === selectedReq?.studentId)?.preOJTRequirements.find(r => r.name === selectedReq?.reqName)?.file?.url || ['Practicum kit (expanded envelope)', 'Attendance OJT Orientation'].includes(selectedReq?.reqName || ''))} onClick={() => handleReviewAction('Approved')}
                 className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold cursor-pointer"
               >
                 <Check className="h-3.5 w-3.5 mr-1" /> Approve clearance
               </Button>
             </DialogFooter>
-          </DialogContent>
+          </DocumentReviewWorkspace>
+</DialogContent>
         </Dialog>
       )}
     </div>

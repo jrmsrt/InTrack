@@ -37,6 +37,7 @@ function Badge({
   return (
     <Comp
       data-slot="badge"
+      data-interactive={props.onClick ? "true" : undefined}
       className={cn(badgeVariants({ variant }), className)}
       {...props}
     />

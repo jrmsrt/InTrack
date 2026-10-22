@@ -46,17 +46,19 @@ export function PrintDTR() {
     );
   }
 
+  const logs = Array.isArray(dtr.logs) ? dtr.logs : [];
+
   const start = new Date(dtr.startDate);
   const monthName = Number.isNaN(start.getTime())
-    ? dtr.month.replace(/\s+\d{4}$/, '')
+    ? (dtr.month || '').replace(/\s+\d{4}$/, '')
     : start.toLocaleString('en-US', { month: 'long' });
   const yearSuffix = Number.isNaN(start.getTime())
-    ? dtr.month.match(/\d{4}/)?.[0].slice(-2) || ''
+    ? (dtr.month || '').match(/\d{4}/)?.[0].slice(-2) || ''
     : String(start.getFullYear()).slice(-2);
 
   const getLogForDay = (day: number) => {
     const paddedDay = day < 10 ? `0${day}` : `${day}`;
-    return dtr.logs.find(log => log.date.split('-')[2] === paddedDay);
+    return logs.find(log => log.date.split('-')[2] === paddedDay);
   };
 
   const formatCellTime = (value?: string | null) => {
@@ -71,8 +73,8 @@ export function PrintDTR() {
     return `${hour}:${minute}`;
   };
 
-  const officialStart = formatCellTime(dtr.logs[0]?.timeIn);
-  const officialEnd = formatCellTime([...dtr.logs].reverse().find(log => log.timeOut)?.timeOut);
+  const officialStart = formatCellTime(logs[0]?.timeIn);
+  const officialEnd = formatCellTime([...logs].reverse().find(log => log.timeOut)?.timeOut);
 
   const DTRSlip = ({ copyIndex }: { copyIndex: number }) => (
     <section className={`dtr-slip ${copyIndex < 2 ? 'with-divider' : ''}`}>

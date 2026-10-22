@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { useAuth } from '../../context/AuthContext';
 import { AlertTriangle, CheckCircle2, Mail, Send, ShieldCheck } from 'lucide-react';
-import { BrandedHeader } from '../../components/BrandedHeader';
+import { BrandedHeader } from '../../components/shared/BrandedHeader';
 
 function maskEmail(email: string) {
   const [name, domain] = email.split('@');

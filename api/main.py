@@ -1,5 +1,6 @@
 import json
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -7,8 +8,8 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from .database import db_connection, get_state, parse_json_column, save_state
-from .mailer import send_otp_email
+from .services.database import db_connection, get_state, parse_json_column, save_state
+from .services.mailer import send_otp_email
 
 
 app = FastAPI(title="InTrack API", version="1.0.0")
@@ -53,6 +54,23 @@ class SendOtpPayload(BaseModel):
     purpose: str | None = None
 
 
+class CaptchaVerificationPayload(BaseModel):
+    challengeId: str
+    answer: str
+
+
+class PrivacyConsentPayload(BaseModel):
+    email: str
+    role: str
+    version: str
+    acceptedAt: str
+
+
+captcha_challenges: dict[str, dict[str, Any]] = {}
+CAPTCHA_TTL_MINUTES = 5
+CAPTCHA_MAX_ATTEMPTS = 3
+
+
 @app.exception_handler(HTTPException)
 def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
     if isinstance(exc.detail, dict):
@@ -81,6 +99,79 @@ def to_iso_datetime(value: Any) -> str | None:
     if isinstance(value, datetime):
         return value.isoformat()
     return str(value)
+
+
+def remove_expired_captcha_challenges() -> None:
+    now = datetime.now(timezone.utc)
+    expired_ids = [challenge_id for challenge_id, challenge in captcha_challenges.items() if challenge["expires_at"] <= now]
+    for challenge_id in expired_ids:
+        captcha_challenges.pop(challenge_id, None)
+
+
+@app.get("/api/captcha/challenge")
+def create_captcha_challenge() -> dict[str, str]:
+    remove_expired_captcha_challenges()
+    first = secrets.randbelow(8) + 2
+    second = secrets.randbelow(8) + 1
+    challenge_id = secrets.token_urlsafe(24)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=CAPTCHA_TTL_MINUTES)
+    captcha_challenges[challenge_id] = {
+        "answer": str(first + second),
+        "expires_at": expires_at,
+        "attempts": 0,
+    }
+    return {
+        "challengeId": challenge_id,
+        "prompt": f"What is {first} + {second}?",
+        "expiresAt": expires_at.isoformat(),
+    }
+
+
+@app.post("/api/captcha/verify")
+def verify_captcha(payload: CaptchaVerificationPayload) -> dict[str, bool]:
+    remove_expired_captcha_challenges()
+    challenge = captcha_challenges.get(payload.challengeId)
+    if not challenge:
+        raise HTTPException(status_code=400, detail="This security challenge has expired. Please try a new one.")
+
+    challenge["attempts"] += 1
+    if not secrets.compare_digest(challenge["answer"], payload.answer.strip()):
+        if challenge["attempts"] >= CAPTCHA_MAX_ATTEMPTS:
+            captcha_challenges.pop(payload.challengeId, None)
+        raise HTTPException(status_code=400, detail="That answer was not correct. Please try again.")
+
+    captcha_challenges.pop(payload.challengeId, None)
+    return {"verified": True}
+
+
+@app.post("/api/privacy-consents")
+def save_privacy_consent(payload: PrivacyConsentPayload) -> dict[str, bool]:
+    accepted_at = to_mysql_datetime(payload.acceptedAt)
+    if not accepted_at or not payload.email.strip() or not payload.version.strip():
+        raise HTTPException(status_code=400, detail="A complete consent record is required.")
+    if payload.role not in {"student", "adviser", "coordinator"}:
+        raise HTTPException(status_code=400, detail="The account role is not valid.")
+
+    try:
+        with db_connection() as connection:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO privacy_consents (account_identifier, account_role, notice_version, accepted_at)
+                        VALUES (%s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE accepted_at = VALUES(accepted_at)
+                        """,
+                        (payload.email.strip().lower(), payload.role, payload.version.strip(), accepted_at),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    return {"ok": True}
 
 
 def map_authorized_student(row: dict[str, Any]) -> dict[str, Any]:
